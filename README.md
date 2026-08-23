@@ -69,7 +69,7 @@ exists.
 | Profile | What it is for |
 |---|---|
 | `desk-cat` | Plain talking companion, no tools. The fallback when something breaks. |
-| `claude-voice` | Ask what Claude Code is doing, and watch it on the cat's face. |
+| `claude-voice` | Ask what Claude Code is doing, and watch it on the cat's face. Needs `.\cat.ps1 watch` running. |
 
 Everything a profile is lives in `config/profiles/<name>/`: a prompt, a voice,
 and a list of MCP servers. See [config/README.md](config/README.md).

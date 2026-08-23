@@ -41,10 +41,22 @@ voice off.
 ## Running it
 
 ```powershell
-python tools\claude_watch.py            # face, and speaks on waiting
-python tools\claude_watch.py --say-all  # also speaks on done and error
-python tools\claude_watch.py --dry-run  # prints what it would push
+.\cat.ps1 watch     # starts this and the status agent, detached
+.\cat.ps1 status    # says whether both are up
+.\cat.ps1 unwatch   # stops them
 ```
+
+To run it in the foreground and watch it work, or to change what it says out
+loud:
+
+```powershell
+py -3.13 tools\claude_watch.py            # face, and speaks on waiting
+py -3.13 tools\claude_watch.py --say-all  # also speaks on done and error
+py -3.13 tools\claude_watch.py --dry-run  # prints what it would push
+```
+
+Use a real CPython rather than whatever `python` resolves to. On this machine
+`python` is the MSYS2 build, which cannot read Windows process state.
 
 It reuses ccpet's own rule for which session wins when several are running,
 including the staleness timeouts and louder-beats-busier, so the cat and the pet

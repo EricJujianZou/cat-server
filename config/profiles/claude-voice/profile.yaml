@@ -2,10 +2,14 @@
 # answers out loud, so you do not switch windows to find out that nothing has
 # changed.
 #
-# Needs two things running on Windows, neither of which starts on its own:
+# Needs two helpers running on Windows, because that is where Claude Code and
+# ccpet write their state. One command starts both, detached:
 #
-#   py -3.13 tools\claude_status_agent.py     answers "what is running"
-#   py tools\claude_watch.py                  puts the state on the cat's face
+#   .\cat.ps1 watch      start them
+#   .\cat.ps1 status     check they are up
+#   .\cat.ps1 unwatch    stop them
+#
+# Without them the cat still talks, it just says it cannot see the sessions.
 #
 # The cat cannot send anything back into a session. docs/voice-into-claude.md
 # explains what that would take.
