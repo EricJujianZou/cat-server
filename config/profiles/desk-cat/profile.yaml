@@ -1,0 +1,23 @@
+# The plain companion. No tools, no integrations, nothing to break.
+# This is the profile to fall back to when something else is misbehaving,
+# because if the cat cannot hold a conversation on this one, the problem is the
+# server or the connection rather than the profile.
+
+description: Plain talking companion. No tools. The fallback when something breaks.
+
+TTS:
+  EdgeTTS:
+    voice: en-US-AvaNeural
+
+LLM:
+  OpenAILLM:
+    model_name: gpt-4o-mini
+
+notes: |
+  Voices worth trying, all Edge TTS and all free:
+    en-US-AvaNeural      warm, young, the default
+    en-US-EmmaNeural     brighter, faster
+    en-GB-SoniaNeural    British, calmer
+    en-US-AndrewNeural   male, low
+    en-IN-NeerjaNeural   Indian English
+  Full list: docker exec cat-server edge-tts --list-voices

@@ -1,0 +1,63 @@
+# Shared by every profile. Anything a profile does not override comes from here,
+# and anything absent from both falls back to the image's own config.yaml.
+#
+# Do not put API keys in this file. It is committed. Keys live in .env and are
+# substituted in by name, dollar-brace style, when the profile is built.
+#
+# To change something for ONE profile, put it in that profile's profile.yaml
+# instead. To change it for all of them, change it here.
+
+server:
+  ip: 0.0.0.0
+  port: 8000
+  http_port: 8003
+  # The address the cat is told to dial. It has to be reachable from the cat, so
+  # it is the laptop's LAN address rather than localhost.
+  websocket: ws://${HOST_LAN_IP}:8000/xiaozhi/v1/
+  vision_explain: http://${HOST_LAN_IP}:8003/mcp/vision/explain
+  timezone_offset: -4
+
+selected_module:
+  VAD: SileroVAD
+  ASR: OpenaiASR
+  LLM: OpenAILLM
+  TTS: EdgeTTS
+  Memory: nomem
+  Intent: function_call
+
+ASR:
+  OpenaiASR:
+    type: openai
+    api_key: ${OPENAI_API_KEY}
+    base_url: https://api.openai.com/v1/audio/transcriptions
+    model_name: gpt-4o-mini-transcribe
+    output_dir: tmp/
+
+LLM:
+  OpenAILLM:
+    type: openai
+    base_url: https://api.openai.com/v1
+    model_name: gpt-4o-mini
+    api_key: ${OPENAI_API_KEY}
+
+TTS:
+  EdgeTTS:
+    type: edge
+    voice: en-US-AvaNeural
+    output_dir: tmp/
+
+# The bundled plugin folder is off by default and every profile should leave it
+# off unless it has a reason. All five bundled plugins are either China-only
+# services or need a key we do not have:
+#
+#   web_search             needs a Metaso or Tavily key
+#   get_weather            Chinese weather API, defaults to Guangzhou
+#   get_news_from_newsnow  Chinese news sources
+#   play_music             the bundled library is three Chinese songs
+#   change_role            replaces the profile's persona with a Chinese one
+#
+# Real abilities come from MCP servers listed in each profile's mcp.json.
+Intent:
+  function_call:
+    type: function_call
+    functions: []

@@ -13,10 +13,63 @@ face. It never sees text in either direction.
 ## Setup
 
 1. Put your keys in `.env`. It is gitignored and never leaves this machine.
-2. `./render-config.sh` to generate `data/.config.yaml` from the template.
-3. `docker compose up -d`
-4. Point the cat at `http://<your LAN ip>:8003/xiaozhi/ota/` in its Wi-Fi
+2. `.\cat.ps1 use desk-cat` builds that profile and restarts the server.
+3. Point the cat at `http://<your LAN ip>:8003/xiaozhi/ota/` in its Wi-Fi
    config portal, under Advanced.
+
+Everything you would want to change lives in `config/`, one folder per profile.
+See [config/README.md](config/README.md).
+
+## What the cat can do
+
+Two separate systems, and they are easy to confuse.
+
+**Its own body.** Speaker volume, screen brightness and screen theme are tools
+that live on the cat, not here. When it opens the WebSocket it sends the server
+a list of them, and the server hands that list to the model as callable tools.
+Nothing in this repo configures that. If the cat is connected, they work. If the
+cat says it cannot change its volume, the cause is the connection or the model,
+never a missing setting on this side.
+
+**Everything else.** Anything the cat does not physically own has to come from
+the server. There are two routes.
+
+The first is the plugin folder baked into the image: `web_search`, `get_weather`,
+`get_news_from_newsnow`, `play_music`, `change_role`. All of them are turned off
+in `config/base.yaml`, and the comment there says why for each one. Short
+version: three need keys for Chinese services, the bundled music library is three
+Chinese songs, and `change_role` overwrites the English cat persona. Turning any
+of them on means the model is told it can do something it will then fail at, out
+loud, mid-sentence.
+
+The second route is standard MCP servers, and this is the one worth using. List
+them in a profile's `config/profiles/<name>/mcp.json` in the usual `mcpServers`
+shape and the server starts them and exposes their tools to the model on the
+same footing as the cat's own. stdio, SSE and streamable HTTP all work.
+
+The cat's screen is drawn by its own firmware and can only show one of 21 built
+in faces, picked by the server sending an emoji. Arbitrary artwork cannot be
+pushed to it without reflashing. The list is in
+[config/README.md](config/README.md).
+
+## Keeping it running
+
+The container only lives while a WSL session is open. Close the last terminal and
+WSL shuts the distro down about twenty seconds later, taking the server with it,
+and nothing brings it back until someone opens WSL again. Measured: the OTA
+endpoint answered 200 twice, then went dead ten seconds after the last `wsl.exe`
+process was killed, and stayed dead for the next eighty seconds.
+
+The fix is one line in `%USERPROFILE%\.wslconfig`:
+
+```ini
+[experimental]
+vmIdleTimeout=-1
+```
+
+Then `wsl --shutdown` once so it takes effect. The alternative is a Windows
+scheduled task at logon that runs `wsl.exe -d Ubuntu -e sleep infinity`, which
+does the same thing with more moving parts.
 
 ## Where the keys go
 
