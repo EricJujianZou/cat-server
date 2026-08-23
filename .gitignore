@@ -12,3 +12,6 @@ tmp/
 
 # firmware images
 *.bin
+
+# extracted from the image for diffing, not ours
+patches/connection.py.orig

@@ -11,8 +11,14 @@ services:
     # Ports it opens:
     #   8000  WebSocket the cat holds open, carrying audio both ways
     #   8003  HTTP, serves the endpoint the cat asks at boot
+    #   8004  HTTP, the push bridge added by patches/. Not part of the image.
     network_mode: host
     environment:
       TZ: America/Toronto
     volumes:
       - ./data:/opt/xiaozhi-esp32-server/data
+      # Two file overlays that add server push. push_bridge.py is new, and
+      # connection.py is the stock file with a two-line hook that calls into it.
+      # Remove both lines and the container is stock again. See patches/README.md.
+      - ./patches/push_bridge.py:/opt/xiaozhi-esp32-server/core/push_bridge.py:ro
+      - ./patches/connection.py:/opt/xiaozhi-esp32-server/core/connection.py:ro
