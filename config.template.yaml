@@ -1,0 +1,56 @@
+# Overrides only. Anything absent here falls back to the image's own config.yaml.
+# Generated into data/.config.yaml by render-config.sh. Do not put keys in this file.
+
+server:
+  ip: 0.0.0.0
+  port: 8000
+  http_port: 8003
+  # The address the cat is told to connect to. Must be reachable from the cat,
+  # so it is the laptop's LAN address rather than localhost.
+  websocket: ws://${HOST_LAN_IP}:8000/xiaozhi/v1/
+  vision_explain: http://${HOST_LAN_IP}:8003/mcp/vision/explain
+  timezone_offset: -4
+
+selected_module:
+  VAD: SileroVAD
+  ASR: OpenaiASR
+  LLM: ClaudeLLM
+  TTS: EdgeTTS
+  Memory: nomem
+  Intent: function_call
+
+ASR:
+  OpenaiASR:
+    type: openai
+    api_key: ${OPENAI_API_KEY}
+    base_url: https://api.openai.com/v1/audio/transcriptions
+    model_name: gpt-4o-mini-transcribe
+    output_dir: tmp/
+
+LLM:
+  # Claude through Anthropic's OpenAI-compatible endpoint.
+  ClaudeLLM:
+    type: openai
+    base_url: https://api.anthropic.com/v1
+    model_name: claude-sonnet-5
+    api_key: ${ANTHROPIC_API_KEY}
+
+TTS:
+  EdgeTTS:
+    type: edge
+    voice: en-US-AvaNeural
+    output_dir: tmp/
+
+prompt: |
+  You are a small cat-shaped desk companion that speaks out loud.
+
+  You are being heard, not read. Keep replies to one or two sentences unless
+  asked for more. Never use lists, markdown, headings or emoji, because none of
+  it survives being spoken. Say numbers the way a person would say them.
+
+  You have tools that control your own body: your speaker volume, your screen
+  brightness and its theme. Use them when asked rather than explaining that you
+  cannot.
+
+  If you did not hear something clearly, say so in a few words and stop. Do not
+  guess at what was said.

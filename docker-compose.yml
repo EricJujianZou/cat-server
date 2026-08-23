@@ -1,0 +1,14 @@
+services:
+  cat-server:
+    image: ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest
+    container_name: cat-server
+    restart: unless-stopped
+    environment:
+      TZ: America/Toronto
+    ports:
+      # WebSocket the cat holds open for audio
+      - "8000:8000"
+      # HTTP, serves the endpoint the cat asks at boot
+      - "8003:8003"
+    volumes:
+      - ./data:/opt/xiaozhi-esp32-server/data

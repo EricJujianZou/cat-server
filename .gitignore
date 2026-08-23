@@ -1,0 +1,14 @@
+# secrets
+.env
+
+# generated from config.template.yaml, contains live API keys
+data/.config.yaml
+
+# runtime state
+data/
+models/
+tmp/
+*.log
+
+# firmware images
+*.bin
