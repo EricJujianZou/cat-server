@@ -1,0 +1,60 @@
+# ccpet on the cat
+
+You asked whether ccpet's pictures and sounds could go on the cat's screen. The
+pictures cannot. The states can, and they do.
+
+## Why the artwork does not transfer
+
+The cat's screen is drawn by its own firmware, not by the server. The server's
+only screen channel is an emoji, and the firmware maps that emoji to one of 21
+faces it already holds. Nothing else reaches the screen. Arbitrary artwork would
+mean reflashing the device, which is exactly what this whole setup exists to
+avoid.
+
+The full list is in `config/README.md`. ccpet's own poses have no equivalent
+there, so what transfers is the meaning rather than the drawing.
+
+## The mapping
+
+| ccpet state | ccpet pose | Cat face |
+|---|---|---|
+| waiting | needs-you | 😲 surprised |
+| error | error | 😔 sad |
+| done | done, feet up with noodles | 🤤 delicious |
+| asleep | asleep | 😴 sleepy |
+| thinking, reading, editing, searching, running, delegating | the working family | 🤔 thinking |
+
+`delicious` for done is the closest the firmware gets to the instant noodles,
+which is the one pose in ccpet with a specific joke in it.
+
+## Sound
+
+ccpet ships no audio files, so there is nothing to play. The cat speaks instead,
+which is better anyway: a tone tells you something happened, a sentence tells
+you what. It says one line, only on the state worth interrupting someone for.
+
+> Claude needs you in cat-server.
+
+`--say-all` extends that to done and error. `--silent` turns the face on and the
+voice off.
+
+## Running it
+
+```powershell
+python tools\claude_watch.py            # face, and speaks on waiting
+python tools\claude_watch.py --say-all  # also speaks on done and error
+python tools\claude_watch.py --dry-run  # prints what it would push
+```
+
+It reuses ccpet's own rule for which session wins when several are running,
+including the staleness timeouts and louder-beats-busier, so the cat and the pet
+never disagree about what is happening.
+
+## What it needs
+
+The push bridge, which is the two mounted files in `patches/`, and a cat
+connected. With the hardware off, `python3 tools/fake_cat.py --listen` stands in
+and prints everything the server sends.
+
+Verified this way: the state changed to waiting, the fake device received the
+`surprised` face and then 34 frames of Opus audio saying the line.

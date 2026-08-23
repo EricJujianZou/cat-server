@@ -54,22 +54,31 @@ pushed to it without reflashing. The list is in
 
 ## Keeping it running
 
-The container only lives while a WSL session is open. Close the last terminal and
-WSL shuts the distro down about twenty seconds later, taking the server with it,
-and nothing brings it back until someone opens WSL again. Measured: the OTA
-endpoint answered 200 twice, then went dead ten seconds after the last `wsl.exe`
-process was killed, and stayed dead for the next eighty seconds.
+The server only lives while a terminal is open. WSL starts shutting the distro
+down about twenty seconds after the last session closes, systemd stops docker on
+the way down, and the container goes with it. The fix is a scheduled task at
+logon holding one WSL session open, and it is the one setup step that has to be
+run by hand. [docs/keeping-it-running.md](docs/keeping-it-running.md) has the
+measurements and the command.
 
-The fix is one line in `%USERPROFILE%\.wslconfig`:
+## Profiles
 
-```ini
-[experimental]
-vmIdleTimeout=-1
-```
+Same hardware, same server, different config. `.\cat.ps1 list` shows what
+exists.
 
-Then `wsl --shutdown` once so it takes effect. The alternative is a Windows
-scheduled task at logon that runs `wsl.exe -d Ubuntu -e sleep infinity`, which
-does the same thing with more moving parts.
+| Profile | What it is for |
+|---|---|
+| `desk-cat` | Plain talking companion, no tools. The fallback when something breaks. |
+| `claude-voice` | Ask what Claude Code is doing, and watch it on the cat's face. |
+
+Everything a profile is lives in `config/profiles/<name>/`: a prompt, a voice,
+and a list of MCP servers. See [config/README.md](config/README.md).
+
+## Testing without the hardware
+
+`python3 tools/fake_cat.py "what time is it"` connects the way the real device
+does and prints everything the server sends back, including which face it asked
+for and how much audio came out. It needs no microphone and no cat.
 
 ## Where the keys go
 
@@ -85,8 +94,39 @@ To put Claude back in as the brain instead, add an `ANTHROPIC_API_KEY` and point
 the `OpenAILLM` block at `https://api.anthropic.com/v1` with a Claude model
 name. Anthropic has no speech to text, so the OpenAI key stays either way.
 
-Never put a key in `config.template.yaml`. That file is committed. `.env` and
-the rendered `data/.config.yaml` are both ignored.
+Never put a key in `config/`. That whole folder is committed. `.env` and the
+built `data/.config.yaml` are both ignored.
+
+### Why it cannot search the web or read the weather
+
+Both are real plugins in the server image, and both are switched off because
+neither has a key that works here.
+
+| Plugin | Needs | Why it is off |
+|---|---|---|
+| `web_search` | a Metaso or Tavily key | The image ships the literal string `mk-xxx`. |
+| `get_weather` | a QWeather key and host | The shared key is rate limited and the default city is Guangzhou. |
+| `get_news_from_newsnow` | nothing | The sources are Chinese. |
+| `play_music` | nothing | The bundled library is three Chinese songs. |
+| `change_role` | nothing | It replaces the profile's persona with a Chinese one. |
+
+Leaving them on is worse than leaving them off, because the model is told it can
+search and then fails out loud in the middle of a sentence.
+
+Search is the one worth turning on, and it needs a Tavily key. Weather does not
+need a key at all if it goes through an MCP server against Open-Meteo instead of
+the bundled plugin.
+
+## Docs
+
+| | |
+|---|---|
+| [config/README.md](config/README.md) | Every knob, and how to add a profile |
+| [patches/README.md](patches/README.md) | The two mounted files, and what they change |
+| [docs/keeping-it-running.md](docs/keeping-it-running.md) | Why it dies, and the one command that fixes it |
+| [docs/ccpet-on-the-cat.md](docs/ccpet-on-the-cat.md) | ccpet states on the cat's face, and why not its artwork |
+| [docs/voice-into-claude.md](docs/voice-into-claude.md) | What `/voice` is, and what talking back would take |
+| [docs/use-case-research.md](docs/use-case-research.md) | Who this device is actually for, globally |
 
 ## Ports
 
