@@ -45,6 +45,12 @@ TTS:
     type: edge
     voice: en-US-AvaNeural
     output_dir: tmp/
+    # The server wraps every profile's prompt in its own template, and that
+    # template hard-codes an output language which defaults to Chinese. Without
+    # this line the cat answers in Chinese no matter what the prompt says, which
+    # is not a model problem and cannot be fixed by asking it nicely.
+    # Set this to the language the profile's voice speaks.
+    language: English
 
 # The bundled plugin folder is off by default and every profile should leave it
 # off unless it has a reason. All five bundled plugins are either China-only

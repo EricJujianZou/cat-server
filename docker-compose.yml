@@ -22,3 +22,6 @@ services:
       # Remove both lines and the container is stock again. See patches/README.md.
       - ./patches/push_bridge.py:/opt/xiaozhi-esp32-server/core/push_bridge.py:ro
       - ./patches/connection.py:/opt/xiaozhi-esp32-server/core/connection.py:ro
+      # MCP servers the profiles can launch. Read only, so the container can run
+      # them but nothing in it can rewrite them.
+      - ./tools/mcp:/opt/xiaozhi-esp32-server/mcp-tools:ro

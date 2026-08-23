@@ -1,0 +1,22 @@
+# The cat as a status light you can talk to. Ask it what Claude is doing and it
+# answers out loud, so you do not switch windows to find out that nothing has
+# changed.
+#
+# Needs two things running on Windows, neither of which starts on its own:
+#
+#   py -3.13 tools\claude_status_agent.py     answers "what is running"
+#   py tools\claude_watch.py                  puts the state on the cat's face
+#
+# The cat cannot send anything back into a session. docs/voice-into-claude.md
+# explains what that would take.
+
+description: Ask what Claude Code is doing, and watch it on the cat's face.
+
+TTS:
+  EdgeTTS:
+    # Lower and flatter than the default, because this one interrupts you.
+    voice: en-US-AndrewNeural
+
+LLM:
+  OpenAILLM:
+    model_name: gpt-4o-mini
