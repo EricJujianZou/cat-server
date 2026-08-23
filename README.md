@@ -42,6 +42,20 @@ the rendered `data/.config.yaml` are both ignored.
 | 8000 | WebSocket the cat holds open, carrying audio both ways |
 | 8003 | HTTP, serves the endpoint the cat asks at boot |
 
+The container runs on host networking rather than a published port map. Docker's
+bridge does not survive `networkingMode=mirrored`: the proxy listens, but nothing
+behind it answers. On host networking the server binds the LAN address itself.
+
+Windows blocks inbound traffic to WSL by default, through a separate Hyper-V
+firewall whose `DefaultInboundAction` is `Block`. Two rules open just these
+ports, and they need an elevated shell:
+
+```powershell
+$vm = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
+New-NetFirewallHyperVRule -Name cat-server-ws   -DisplayName 'cat-server WebSocket 8000' -Direction Inbound -VMCreatorId $vm -Protocol TCP -LocalPorts 8000 -Action Allow
+New-NetFirewallHyperVRule -Name cat-server-http -DisplayName 'cat-server HTTP 8003'      -Direction Inbound -VMCreatorId $vm -Protocol TCP -LocalPorts 8003 -Action Allow
+```
+
 ## Why the cat stops asking for an activation code
 
 The seller's server replies to the boot request with an `activation` block, and

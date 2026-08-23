@@ -3,12 +3,16 @@ services:
     image: ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest
     container_name: cat-server
     restart: unless-stopped
+    # Host networking, not a published port map. WSL runs with
+    # networkingMode=mirrored so the distro holds the Windows LAN address
+    # directly, and Docker's bridge does not survive that. On host networking
+    # the server binds 192.168.4.46 itself, which is what the cat dials.
+    #
+    # Ports it opens:
+    #   8000  WebSocket the cat holds open, carrying audio both ways
+    #   8003  HTTP, serves the endpoint the cat asks at boot
+    network_mode: host
     environment:
       TZ: America/Toronto
-    ports:
-      # WebSocket the cat holds open for audio
-      - "8000:8000"
-      # HTTP, serves the endpoint the cat asks at boot
-      - "8003:8003"
     volumes:
       - ./data:/opt/xiaozhi-esp32-server/data
