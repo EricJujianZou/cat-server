@@ -6,7 +6,7 @@ server at `101.35.234.159` and talks to this machine instead.
 ## What runs where
 
 The cat holds one WebSocket open to this server and streams compressed audio
-down it. Speech recognition, Claude, and speech synthesis all happen here. The
+down it. Speech recognition, the model, and speech synthesis all happen here. The
 cat itself only does wake-word detection, echo cancellation, and drawing its own
 face. It never sees text in either direction.
 
@@ -20,12 +20,17 @@ face. It never sees text in either direction.
 
 ## Where the keys go
 
+One key does both jobs.
+
 | Key | What it does | Where to get it |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Claude answers the questions | console.anthropic.com |
-| `OPENAI_API_KEY` | Whisper turns your voice into text | platform.openai.com |
+| `OPENAI_API_KEY` | Turns your voice into text, and answers | platform.openai.com |
 
 Text to speech uses Edge TTS, which needs no key and costs nothing.
+
+To put Claude back in as the brain instead, add an `ANTHROPIC_API_KEY` and point
+the `OpenAILLM` block at `https://api.anthropic.com/v1` with a Claude model
+name. Anthropic has no speech to text, so the OpenAI key stays either way.
 
 Never put a key in `config.template.yaml`. That file is committed. `.env` and
 the rendered `data/.config.yaml` are both ignored.
@@ -49,7 +54,8 @@ account is involved.
 Docker Engine runs inside WSL2. Published ports reach Windows `localhost`
 automatically, but the cat connects across the LAN, which needs
 `networkingMode=mirrored` in `%USERPROFILE%\.wslconfig` so WSL shares the host's
-network interface. That setting takes effect after `wsl --shutdown`.
+network interface. That is already set, and confirmed working: the Ubuntu distro
+now holds `192.168.4.46` on `eth0`, the same address as Windows.
 
 ## Moving to AWS later
 

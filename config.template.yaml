@@ -14,7 +14,7 @@ server:
 selected_module:
   VAD: SileroVAD
   ASR: OpenaiASR
-  LLM: ClaudeLLM
+  LLM: OpenAILLM
   TTS: EdgeTTS
   Memory: nomem
   Intent: function_call
@@ -28,12 +28,13 @@ ASR:
     output_dir: tmp/
 
 LLM:
-  # Claude through Anthropic's OpenAI-compatible endpoint.
-  ClaudeLLM:
+  # Swap model_name for gpt-4o if the replies feel thin. mini is chosen here
+  # because latency matters more than depth when someone is waiting out loud.
+  OpenAILLM:
     type: openai
-    base_url: https://api.anthropic.com/v1
-    model_name: claude-sonnet-5
-    api_key: ${ANTHROPIC_API_KEY}
+    base_url: https://api.openai.com/v1
+    model_name: gpt-4o-mini
+    api_key: ${OPENAI_API_KEY}
 
 TTS:
   EdgeTTS:
