@@ -13,8 +13,12 @@ face. It never sees text in either direction.
 ## Setup
 
 1. Put your keys in `.env`. It is gitignored and never leaves this machine.
-2. `.\cat.ps1 use desk-cat` builds that profile and restarts the server.
-3. Point the cat at `http://<your LAN ip>:8003/xiaozhi/ota/` in its Wi-Fi
+2. Build the image once, inside WSL:
+   `docker build -f Dockerfile.slim -t cat-server:slim .`
+   This takes the 10.6GB upstream image and drops the packages this config never
+   imports, which is most of them. See [docs/slim-image.md](docs/slim-image.md).
+3. `.\cat.ps1 use desk-cat` builds that profile and restarts the server.
+4. Point the cat at `http://<your LAN ip>:8003/xiaozhi/ota/` in its Wi-Fi
    config portal, under Advanced.
 
 Everything you would want to change lives in `config/`, one folder per profile.
@@ -136,6 +140,7 @@ the bundled plugin.
 | [config/README.md](config/README.md) | Every knob, and how to add a profile |
 | [patches/README.md](patches/README.md) | The two mounted files, and what they change |
 | [docs/keeping-it-running.md](docs/keeping-it-running.md) | Why it dies, and the one command that fixes it |
+| [docs/slim-image.md](docs/slim-image.md) | 10.6GB down to 1.3GB, what came out and how it was checked |
 | [docs/ccpet-on-the-cat.md](docs/ccpet-on-the-cat.md) | ccpet states on the cat's face, and why not its artwork |
 | [docs/voice-into-claude.md](docs/voice-into-claude.md) | What `/voice` is, and what talking back would take |
 | [docs/use-case-research.md](docs/use-case-research.md) | Who this device is actually for, globally |

@@ -1,6 +1,13 @@
 services:
   cat-server:
-    image: ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest
+    # Built by Dockerfile.slim from the upstream image, with the packages this
+    # config never imports deleted. 10.6GB down to 1.31GB, same code, same
+    # versions of everything that is left.
+    #   docker build -f Dockerfile.slim -t cat-server:slim .
+    # To go back to stock, put this tag on the image line instead:
+    #   ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest
+    # See docs/slim-image.md.
+    image: cat-server:slim
     container_name: cat-server
     restart: unless-stopped
     # Host networking, not a published port map. WSL runs with

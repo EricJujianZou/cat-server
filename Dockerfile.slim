@@ -1,0 +1,83 @@
+# syntax=docker/dockerfile:1
+#
+# A smaller build of the same server.
+#
+# The upstream image is 10.6GB because its requirements.txt installs torch,
+# torchaudio and the whole CUDA runtime, plus the local speech recognition
+# stacks. This configuration uses none of that. Speech recognition and the
+# language model are OpenAI over HTTP, speech synthesis is Edge TTS over HTTP,
+# and voice activity detection is Silero, which core/providers/vad/silero.py
+# runs through onnxruntime on the CPU rather than through torch.
+#
+# So this does not rebuild anything. It starts from the upstream image, deletes
+# the packages that are never imported, and flattens the result into one layer.
+# Every package left is the exact build upstream shipped, same version, same
+# Python 3.10.20, same Debian, same ffmpeg. See docs/slim-image.md.
+#
+#   docker build -f Dockerfile.slim -t cat-server:slim .
+
+ARG BASE=ghcr.io/xinnan-tech/xiaozhi-esp32-server:server_latest
+
+FROM ${BASE} AS pruned
+
+# The list below was not guessed. The server was started under a wrapper that
+# recorded sys.modules after a full conversation, and nothing named here was in
+# it. Everything the running server does import is left alone.
+RUN set -eux; \
+    cd /usr/local/lib/python3.10/site-packages; \
+    rm -rf \
+      nvidia torch torchaudio torchgen torio functorch triton \
+      llvmlite numba \
+      scipy scipy.libs sympy mpmath isympy.py networkx \
+      sklearn scikit_learn.libs threadpoolctl.py joblib \
+      funasr modelscope sherpa_onnx sherpa_onnx.libs vosk silero_vad jieba \
+      sentencepiece editdistance kaldiio jamo jaconv torch_complex \
+      pytorch_wpe.py rank_bm25.py tensorboardX \
+      librosa soxr audioread soundfile.py _soundfile.py _soundfile_data pooch \
+      lazy_loader umap pynndescent hydra omegaconf antlr4 \
+      google googleapiclient apiclient google_crc32c google_crc32c.libs \
+      google_auth_httplib2.py httplib2 uritemplate crcmod \
+      grpc grpc_status proto vertexai vertex_ray \
+      google_generativeai-*-nspkg.pth google_cloud_aiplatform-*-nspkg.pth \
+      sqlalchemy greenlet psycopg psycopg_pool psycopg2 psycopg2_binary.libs \
+      pymysql aiomysql pgvector pyobvector qdrant_client sqlglot \
+      shapely shapely.libs \
+      mem0 powermem posthog \
+      anthropic together ollama zai dashscope cozepy \
+      aliyunsdkcore aliyunsdkkms oss2 aip
+
+# Drop the metadata the deleted packages left behind, so nothing that asks
+# importlib.metadata whether torch is installed gets told yes.
+RUN python - <<'PY'
+import glob, os, shutil
+sp = "/usr/local/lib/python3.10/site-packages"
+gone = 0
+for info in glob.glob(os.path.join(sp, "*.dist-info")):
+    top = os.path.join(info, "top_level.txt")
+    if not os.path.exists(top):
+        continue
+    names = [line.strip() for line in open(top) if line.strip()]
+    if not names:
+        continue
+    if all(not os.path.exists(os.path.join(sp, n))
+           and not glob.glob(os.path.join(sp, n + ".*"))
+           for n in names):
+        shutil.rmtree(info, ignore_errors=True)
+        gone += 1
+print("removed %d orphaned dist-info directories" % gone)
+PY
+
+# Deleting files in a new layer does not make an image smaller, it only hides
+# them, so the pruned filesystem is copied into a fresh image with no history.
+# The metadata below is the upstream image's, restated because scratch has none.
+FROM scratch
+COPY --from=pruned / /
+
+ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=zh_CN.UTF-8 \
+    LC_ALL=zh_CN.UTF-8 \
+    LANGUAGE=zh_CN:zh \
+    PYTHONIOENCODING=utf-8
+
+WORKDIR /opt/xiaozhi-esp32-server
+CMD ["python", "app.py"]
