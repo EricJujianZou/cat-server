@@ -28,12 +28,41 @@ See [config/README.md](config/README.md).
 
 Two separate systems, and they are easy to confuse.
 
-**Its own body.** Speaker volume, screen brightness and screen theme are tools
-that live on the cat, not here. When it opens the WebSocket it sends the server
-a list of them, and the server hands that list to the model as callable tools.
-Nothing in this repo configures that. If the cat is connected, they work. If the
-cat says it cannot change its volume, the cause is the connection or the model,
-never a missing setting on this side.
+**Its own body.** These tools live on the cat, not here. When it opens the
+WebSocket it sends the server a list of them, and the server hands that list to
+the model as callable tools. Nothing in this repo configures that. If the cat is
+connected, they work. If the cat says it cannot change its volume, the cause is
+the connection or the model, never a missing setting on this side.
+
+The list is the firmware's, so it varies by board and by firmware version. This
+is what the cat on this desk announced, read out of the server log:
+
+| Tool | What it does |
+|---|---|
+| `self_get_device_status` | battery, volume, brightness, network, whatever the board tracks |
+| `self_audio_speaker_set_volume` | speaker volume, 0 to 100 |
+| `self_screen_set_brightness` | screen brightness, 0 to 100 |
+| `self_screen_set_theme` | light or dark |
+| `self_timer_manage` | set, list and cancel timers on the device |
+| `self_online_music_play_music` | play a track from the firmware's own music service |
+| `self_online_music_control_playback` | pause, resume, skip |
+| `self_online_music_manage_playlist` | add and remove tracks |
+| `self_sys_get_new_message` | read messages the firmware has queued |
+| `self_sys_get_verification_code` | the pairing code for the seller's app, unused here |
+
+Four more come from the server side and are always present: `handle_exit_intent`
+lets the model end the conversation itself, `get_lunar` answers lunar calendar
+questions, and `claude_status` and `claude_sessions` come from the
+`claude-voice` profile's MCP server. Fourteen in total on this setup.
+
+Two of these are worth knowing about. `self_timer_manage` means kitchen timers
+already work with no server-side work at all. `handle_exit_intent` is why saying
+"close the connection" in English ends the session even though the configured
+exit commands are Chinese only: the model calls the tool rather than matching a
+phrase.
+
+To see the live list rather than this table, look for `当前支持的函数列表` in
+`.\cat.ps1 logs`.
 
 **Everything else.** Anything the cat does not physically own has to come from
 the server. There are two routes.
@@ -144,6 +173,8 @@ the bundled plugin.
 | [docs/ccpet-on-the-cat.md](docs/ccpet-on-the-cat.md) | ccpet states on the cat's face, and why not its artwork |
 | [docs/voice-into-claude.md](docs/voice-into-claude.md) | What `/voice` is, and what talking back would take |
 | [docs/use-case-research.md](docs/use-case-research.md) | Who this device is actually for, globally |
+| [docs/why-hardware.md](docs/why-hardware.md) | Why not just a phone app, and what the screen would have to become |
+| [docs/voices.md](docs/voices.md) | Which voices work, where to hear them, and what a better one would cost |
 
 ## Ports
 

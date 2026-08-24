@@ -103,10 +103,20 @@ Everything available: `docker exec cat-server edge-tts --list-voices`
 
 Two separate systems, and they are easy to confuse.
 
-**The cat's own body.** Speaker volume, screen brightness and screen theme are
-tools that live on the cat. It sends the server a list of them when it connects,
-and the server hands that list to the model. No profile configures this. If the
-cat is connected, they work.
+**The cat's own body.** These tools live on the cat. It sends the server a list
+of them when it connects, and the server hands that list to the model. No
+profile configures this. If the cat is connected, they work.
+
+The list comes from the firmware and varies by board. The cat on this desk
+announces ten: device status, speaker volume, screen brightness, screen theme,
+timer management, three for online music, a message inbox, and a pairing code
+this setup never uses. Four more are server side and always there:
+`handle_exit_intent`, `get_lunar`, and the two the `claude-voice` profile's MCP
+server adds. The full list for whatever cat is connected is printed at
+`当前支持的函数列表` in `.\cat.ps1 logs`.
+
+`self_timer_manage` is the useful surprise in that list. Timers work today with
+nothing added on this side.
 
 **Everything else** comes from MCP servers listed in the profile's `mcp.json`,
 in the standard `mcpServers` shape. stdio, SSE and streamable HTTP all work.

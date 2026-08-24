@@ -18,8 +18,11 @@ description: Ask what Claude Code is doing, and watch it on the cat's face.
 
 TTS:
   EdgeTTS:
-    # Lower and flatter than the default, because this one interrupts you.
-    voice: en-US-AndrewNeural
+    # Chinese, because that is the wake word the firmware ships and the language
+    # this cat is actually spoken to in. The two lines move together: an English
+    # voice reading Chinese text mispronounces every word of it.
+    voice: zh-CN-XiaoyiNeural
+    language: Chinese
 
 LLM:
   OpenAILLM:
