@@ -217,3 +217,27 @@ now holds the same address on `eth0` that Windows does.
 The image, the compose file and the config are the same on a Linux host. Change
 `HOST_LAN_IP` to the public address, re-render, and change the one URL in the
 cat's portal. Nothing about the firmware changes.
+
+## The dashboard
+
+`.\cat.ps1 dash` starts a local page on `http://127.0.0.1:8080/` and opens it.
+The top of it mirrors `.\cat.ps1 status`: whether the container is up, which
+profile is built, whether the OTA endpoint answers, and whether the two Windows
+helpers are running. Next to that is the device id and address of whatever last
+connected, read out of the log. The rest of the left side is the server log as
+it happens, with a text filter, a level filter, and a switch for the listen
+heartbeats the cat sends every time it opens its microphone.
+
+The panel on the right has three tabs. Under `config` every file in `config/` is
+editable, and one button rebuilds the profile and restarts the server. Under
+`abilities` are the tools the model can call right now, taken from the log
+rather than from the docs, next to the profile's MCP servers and the bundled
+plugins that stay off. Under `voices` is every Edge TTS voice with a play
+button, so one can be heard before it is picked. Choosing a voice writes both
+`voice` and `language` into the active profile, because the server's prompt
+template hard-codes the output language and the two have to match.
+
+It never opens `.env` or `data/.config.yaml`. The config browser reaches only
+`config/`, where the keys are still `${PLACEHOLDERS}`. Samples are rendered by
+the container's own `edge-tts` and cached under `tools/dashboard/.cache/`,
+which is ignored by git.

@@ -13,6 +13,9 @@
 #   .\cat.ps1 watch         start the two Windows helpers the claude-voice
 #                           profile needs, detached so they outlive this window
 #   .\cat.ps1 unwatch       stop them again
+#   .\cat.ps1 dash          open the dashboard in a browser: status, the log
+#                           as it happens, config, and every voice with a
+#                           play button
 
 $ErrorActionPreference = 'Stop'
 $repoWin = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -98,6 +101,12 @@ switch ($sub) {
       $state = if ((Helper-Running $h.needle).Count -gt 0) { 'running' } else { 'stopped, start it with .\cat.ps1 watch' }
       Write-Host ("{0,-14}{1}" -f ($h.label + ':'), $state)
     }
+  }
+
+  'dash' {
+    # The dashboard runs in WSL, next to docker, and opens the browser on the
+    # Windows side itself once it has the port. Ctrl-c here stops it.
+    wsl.exe -e sh -c "cd '$repo' && python3 tools/dashboard/server.py $rest"
   }
 
   default {

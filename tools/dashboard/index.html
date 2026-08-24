@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cat-server</title>
+<style>
+:root {
+  --bg:#0b0e11; --panel:#101418; --panel2:#141a20;
+  --line:#1f272e; --line2:#2a343d;
+  --fg:#c7d2da; --fg2:#8c9aa5; --dim:#5d6b76;
+  --accent:#4ec9b0; --warn:#d8a23f; --err:#ef5f5f;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing:border-box; }
+html, body { height:100%; }
+body {
+  margin:0; background:var(--bg); color:var(--fg);
+  font-family:var(--sans); font-size:13px; line-height:1.5;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+button, input, select, textarea { font-family:inherit; font-size:inherit; color:inherit; }
+button {
+  background:var(--panel2); border:1px solid var(--line2); color:var(--fg2);
+  padding:4px 10px; border-radius:3px; cursor:pointer;
+}
+button:hover { border-color:var(--dim); color:var(--fg); }
+button:disabled { opacity:.4; cursor:default; }
+button.primary { border-color:var(--accent); color:var(--accent); }
+button.primary:hover { background:rgba(78,201,176,.08); }
+input[type=text], input[type=search], select, textarea {
+  background:#0c1013; border:1px solid var(--line2); border-radius:3px;
+  padding:4px 8px; outline:none;
+}
+input:focus, select:focus, textarea:focus { border-color:var(--dim); }
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-thumb { background:#232c34; border-radius:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+
+/* ---------------------------------------------------------------- header */
+header {
+  border-bottom:1px solid var(--line); background:var(--panel);
+  display:flex; align-items:stretch; flex:0 0 auto;
+}
+header .brand {
+  padding:10px 16px; display:flex; flex-direction:column; justify-content:center;
+  border-right:1px solid var(--line); min-width:150px;
+}
+header .brand b { font-size:13px; letter-spacing:.4px; }
+header .brand span { color:var(--dim); font-size:11px; }
+.cells { display:flex; flex:1; min-width:0; overflow-x:auto; }
+.cell {
+  padding:9px 16px; border-right:1px solid var(--line);
+  min-width:0; max-width:230px; display:flex; flex-direction:column; gap:2px;
+  white-space:nowrap; overflow:hidden;
+}
+.cell .k { color:var(--dim); font-size:10px; text-transform:uppercase;
+  letter-spacing:.7px; overflow:hidden; text-overflow:ellipsis; }
+.cell .v { font-family:var(--mono); font-size:12px; color:var(--fg);
+  overflow:hidden; text-overflow:ellipsis; }
+.cell .v.sub { color:var(--fg2); font-size:11px; font-family:var(--sans); }
+.dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px;
+       background:var(--dim); vertical-align:1px; }
+.dot.on { background:var(--accent); }
+.dot.warn { background:var(--warn); }
+.dot.off { background:#3b464f; }
+.dot.bad { background:var(--err); }
+
+/* ------------------------------------------------------------------ body */
+main {
+  flex:1; min-height:0; display:grid;
+  grid-template-columns: minmax(0,1fr) 500px;
+  grid-template-rows: minmax(0,1fr);
+}
+@media (min-width:1700px) { main { grid-template-columns: minmax(0,1fr) 600px; } }
+section.logs {
+  min-width:0; min-height:0; display:flex; flex-direction:column;
+  border-right:1px solid var(--line);
+}
+aside { min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--panel); }
+
+.toolbar {
+  display:flex; align-items:center; gap:8px; padding:7px 12px;
+  border-bottom:1px solid var(--line); background:var(--panel); flex:0 0 auto;
+  flex-wrap:wrap;
+}
+.toolbar .title { font-weight:600; letter-spacing:.3px; margin-right:4px; }
+.toolbar .spacer { flex:1; }
+.chip {
+  border:1px solid var(--line2); border-radius:3px; padding:2px 8px;
+  color:var(--dim); cursor:pointer; user-select:none; font-size:11px;
+  font-family:var(--mono);
+}
+.chip.on { color:var(--fg); border-color:var(--dim); background:var(--panel2); }
+.chip.on[data-level=WARNING] { color:var(--warn); border-color:#4a3a1c; }
+.chip.on[data-level=ERROR] { color:var(--err); border-color:#4a2222; }
+label.check { color:var(--fg2); display:flex; align-items:center; gap:5px; cursor:pointer; font-size:12px; }
+
+#log {
+  flex:1; min-height:0; overflow:auto; padding:6px 0 14px;
+  font-family:var(--mono); font-size:12px; line-height:1.45;
+}
+.row { display:flex; padding:1px 12px; white-space:pre-wrap; word-break:break-word; }
+.row:hover { background:#0f1418; }
+.row .ts { color:#3f4a53; flex:0 0 58px; margin-right:10px; }
+.row .mod { color:#4f6069; flex:0 0 150px; margin-right:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.row .msg { flex:1; min-width:0; color:var(--fg2); }
+.row.info .msg { color:#9fb0bb; }
+.row.warn .msg { color:var(--warn); }
+.row.error .msg { color:var(--err); }
+.row .msg mark { background:rgba(78,201,176,.22); color:#dff5ef; border-radius:2px; }
+#jump {
+  position:absolute; right:22px; bottom:16px; z-index:5; display:none;
+}
+.logwrap { position:relative; flex:1; min-height:0; display:flex; flex-direction:column; }
+.logfoot {
+  flex:0 0 auto; border-top:1px solid var(--line); padding:4px 12px;
+  color:var(--dim); font-size:11px; font-family:var(--mono);
+  display:flex; gap:16px;
+}
+
+/* ------------------------------------------------------------------ tabs */
+.tabs { display:flex; border-bottom:1px solid var(--line); flex:0 0 auto; }
+.tabs button {
+  flex:1; border:0; border-right:1px solid var(--line); border-bottom:2px solid transparent;
+  background:transparent; padding:9px 0; border-radius:0; color:var(--dim);
+}
+.tabs button:last-child { border-right:0; }
+.tabs button.on { color:var(--fg); border-bottom-color:var(--accent); background:var(--panel2); }
+.pane { flex:1; min-height:0; overflow:auto; display:none; }
+.pane.on { display:block; }
+.pad { padding:12px 14px; }
+h3 { margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.9px; color:var(--dim); font-weight:600; }
+.note { color:var(--dim); font-size:11.5px; margin:0 0 10px; }
+.group { border-top:1px solid var(--line); padding:12px 14px; }
+.group:first-child { border-top:0; }
+
+/* ---------------------------------------------------------------- config */
+.filelist { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:4px; }
+.filelist .lbl { color:var(--dim); font-size:11px; width:100%; font-family:var(--mono); margin-top:6px; }
+.filelist .lbl:first-child { margin-top:0; }
+.filebtn { font-family:var(--mono); font-size:11.5px; }
+.filebtn.on { border-color:var(--accent); color:var(--accent); }
+pre.code, textarea.code {
+  font-family:var(--mono); font-size:12px; line-height:1.5;
+  background:#0c1013; border:1px solid var(--line2); border-radius:3px;
+  padding:10px 12px; margin:0; overflow:auto; white-space:pre; tab-size:2;
+  min-height:300px; max-height:none; width:100%;
+}
+textarea.code { resize:vertical; height:440px; display:block; }
+.tok-com { color:#4a5b64; }
+.tok-key { color:#7fb3d5; }
+.tok-str { color:#b3cf9a; }
+.tok-num { color:#d7a06a; }
+.tok-var { color:var(--accent); }
+.tok-pun { color:#5a6a74; }
+.tok-h { color:#7fb3d5; font-weight:600; }
+.msgline { font-family:var(--mono); font-size:11.5px; margin-top:8px; white-space:pre-wrap; }
+.msgline.ok { color:var(--accent); }
+.msgline.bad { color:var(--err); }
+
+/* ------------------------------------------------------------- abilities */
+.tool { display:flex; gap:8px; align-items:baseline; padding:3px 0; font-family:var(--mono); font-size:12px; }
+.tool .n { color:var(--fg); }
+.tool .tag { color:var(--dim); font-size:10.5px; border:1px solid var(--line2); border-radius:2px; padding:0 5px; }
+.tool.off .n { color:#4d5860; text-decoration:line-through; }
+.srv { border:1px solid var(--line); border-radius:3px; padding:9px 11px; margin-bottom:8px; background:var(--panel2); }
+.srv .head { display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:12.5px; }
+.srv .meta { color:var(--dim); font-family:var(--mono); font-size:11px; margin-top:4px; word-break:break-all; }
+.srv .tools { margin-top:6px; }
+.plug { display:flex; gap:10px; padding:4px 0; align-items:baseline; }
+.plug .n { font-family:var(--mono); font-size:12px; color:#4d5860; text-decoration:line-through; flex:0 0 auto; }
+.plug .why { color:var(--dim); font-size:11.5px; }
+
+/* ---------------------------------------------------------------- voices */
+.vfilters { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+.vfilters select, .vfilters input { flex:1; min-width:110px; }
+#sample { width:100%; font-family:var(--mono); }
+.vlist { border-top:1px solid var(--line); }
+.v {
+  display:flex; align-items:center; gap:8px; padding:6px 14px;
+  border-bottom:1px solid var(--line);
+}
+.v:hover { background:var(--panel2); }
+.v.cur { background:rgba(78,201,176,.06); }
+.v .nm { font-family:var(--mono); font-size:12px; flex:1; min-width:0;
+         overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.v .nm small { color:var(--dim); font-family:var(--sans); margin-left:6px; font-size:11px; }
+.v .g { color:var(--dim); font-size:11px; width:52px; flex:0 0 auto; }
+.v button { padding:2px 8px; font-size:11px; }
+.v .play { width:34px; text-align:center; }
+.vhead { padding:10px 14px; border-bottom:1px solid var(--line); }
+.count { color:var(--dim); font-size:11px; font-family:var(--mono); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <b>cat-server</b>
+    <span id="clock">connecting</span>
+  </div>
+  <div class="cells" id="cells"></div>
+</header>
+
+<main>
+  <section class="logs">
+    <div class="toolbar">
+      <span class="title">log</span>
+      <input type="search" id="filter" placeholder="filter text" style="width:190px">
+      <span class="chip on" data-level="INFO">info</span>
+      <span class="chip on" data-level="WARNING">warning</span>
+      <span class="chip on" data-level="ERROR">error</span>
+      <label class="check"><input type="checkbox" id="hidelisten" checked> hide listen heartbeats</label>
+      <span class="spacer"></span>
+      <button id="clear">clear</button>
+    </div>
+    <div class="logwrap">
+      <div id="log"></div>
+      <button id="jump" class="primary">newest</button>
+    </div>
+    <div class="logfoot">
+      <span id="logcount">0 lines</span>
+      <span id="logstate">waiting for the stream</span>
+      <span id="scrollstate"></span>
+    </div>
+  </section>
+
+  <aside>
+    <div class="tabs">
+      <button data-tab="config" class="on">config</button>
+      <button data-tab="abilities">abilities</button>
+      <button data-tab="voices">voices</button>
+    </div>
+
+    <div class="pane on" id="pane-config">
+      <div class="pad">
+        <div class="filelist" id="filelist"></div>
+        <p class="note">Nothing here holds a key. The dashboard never opens
+          <span style="font-family:var(--mono)">.env</span> or
+          <span style="font-family:var(--mono)">data/.config.yaml</span>, and the
+          <span style="font-family:var(--mono)">${PLACEHOLDERS}</span> below are what is on disk.</p>
+        <div class="toolbar" style="padding:0 0 8px; border:0; background:none">
+          <span class="title" id="filename" style="font-family:var(--mono); font-size:12px"></span>
+          <span class="spacer"></span>
+          <button id="edit">edit</button>
+          <button id="save" class="primary" style="display:none">save</button>
+          <button id="cancel" style="display:none">cancel</button>
+          <button id="rebuild">rebuild and restart</button>
+        </div>
+        <pre class="code" id="view"></pre>
+        <textarea class="code" id="editor" spellcheck="false" style="display:none"></textarea>
+        <div class="msgline" id="cfgmsg"></div>
+      </div>
+    </div>
+
+    <div class="pane" id="pane-abilities"></div>
+
+    <div class="pane" id="pane-voices">
+      <div class="vhead">
+        <div id="curvoice" class="count"></div>
+        <div class="vfilters" style="margin-top:8px">
+          <select id="vlang"></select>
+          <select id="vgender">
+            <option selected>Female</option>
+            <option>Male</option>
+            <option value="">any gender</option>
+          </select>
+          <input type="search" id="vsearch" placeholder="search name">
+        </div>
+        <input type="text" id="sample" value="你好，我是你的小猫。Hello, I am your desk cat. 今天想聊点什么呢？">
+        <div class="count" id="vcount" style="margin-top:8px"></div>
+      </div>
+      <div class="vlist" id="vlist"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+/* ------------------------------------------------------------------ header */
+function dot(kind) { return '<span class="dot ' + kind + '"></span>'; }
+
+function renderStatus(s) {
+  if (!s.ready) { $("#clock").textContent = "starting"; return; }
+  $("#clock").textContent = "as of " + s.at;
+  const cells = [];
+
+  cells.push(["container",
+    dot(s.container_up ? "on" : "bad") + esc(s.container || "not running")]);
+
+  cells.push(["profile", esc(s.profile || "none built"), "",
+    s.description || ""]);
+
+  cells.push(["ota 8003",
+    dot(s.ota === 200 ? "on" : "bad") + (s.ota ? s.ota : "no answer")]);
+
+  const d = s.device;
+  if (d) {
+    cells.push(["device",
+      dot(s.connected ? "on" : "off") + esc(d.device_id),
+      esc(d.ip) + " at " + esc(d.at),
+      d.device_id + " from " + d.ip + ", last seen at " + d.at +
+        (d.agent ? ", " + d.agent : "")]);
+  } else {
+    cells.push(["device", dot("off") + "none yet", "no conn line in the log"]);
+  }
+
+  const b = s.bridge;
+  cells.push(["push bridge 8004",
+    b === null ? dot("off") + "not up yet"
+               : dot(b.length ? "on" : "warn") + (b.length + " connected")]);
+
+  const h = s.helpers || {};
+  for (const key of Object.keys(h)) {
+    const v = h[key];
+    cells.push([v.label,
+      dot(v.state === "running" ? "on" : v.state === "unknown" ? "warn" : "off")
+        + esc(v.state),
+      "", v.what]);
+  }
+
+  $("#cells").innerHTML = cells.map(c =>
+    '<div class="cell" title="' + esc(c[3] || c[0]) + '">' +
+    '<span class="k">' + esc(c[0]) + '</span>' +
+    '<span class="v">' + c[1] + '</span>' +
+    (c[2] ? '<span class="v sub">' + c[2] + '</span>' : '') +
+    '</div>').join("");
+}
+
+let statusTimer = null;
+async function pollStatus() {
+  try {
+    const r = await fetch("/api/status");
+    renderStatus(await r.json());
+  } catch (e) { $("#clock").textContent = "dashboard unreachable"; }
+  statusTimer = setTimeout(pollStatus, 3000);
+}
+
+/* -------------------------------------------------------------------- logs */
+const MAX_ROWS = 4000;
+let entries = [];
+let follow = true;
+const logEl = $("#log");
+const levels = { INFO:true, WARNING:true, ERROR:true };
+
+function bucket(level) {
+  if (level === "ERROR" || level === "CRITICAL") return "ERROR";
+  if (level === "WARNING") return "WARNING";
+  return "INFO";
+}
+
+function passes(e) {
+  if (!levels[bucket(e.level)]) return false;
+  if ($("#hidelisten").checked && e.listen) return false;
+  const q = $("#filter").value.trim().toLowerCase();
+  if (q && !(e.msg + " " + e.module).toLowerCase().includes(q)) return false;
+  return true;
+}
+
+function rowHtml(e) {
+  const b = bucket(e.level);
+  const cls = b === "ERROR" ? "error" : b === "WARNING" ? "warn" : "info";
+  const q = $("#filter").value.trim();
+  let msg = esc(e.msg);
+  if (q) {
+    const re = new RegExp("(" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi");
+    msg = msg.replace(re, "<mark>$1</mark>");
+  }
+  return '<div class="row ' + cls + '">' +
+    '<span class="ts">' + esc(e.t.slice(7)) + '</span>' +
+    '<span class="mod">' + esc(e.module) + '</span>' +
+    '<span class="msg">' + msg + '</span></div>';
+}
+
+function redraw() {
+  const shown = entries.filter(passes);
+  logEl.innerHTML = shown.map(rowHtml).join("");
+  $("#logcount").textContent = shown.length + " of " + entries.length + " lines";
+  if (follow) toBottom();
+}
+
+function toBottom() {
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function append(e) {
+  entries.push(e);
+  if (entries.length > MAX_ROWS) entries = entries.slice(-MAX_ROWS);
+  if (!passes(e)) return;
+  const wasFollowing = follow;
+  logEl.insertAdjacentHTML("beforeend", rowHtml(e));
+  while (logEl.childElementCount > MAX_ROWS) logEl.removeChild(logEl.firstChild);
+  $("#logcount").textContent =
+    logEl.childElementCount + " of " + entries.length + " lines";
+  if (wasFollowing) toBottom();
+}
+
+logEl.addEventListener("scroll", () => {
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 30;
+  follow = atBottom;
+  $("#jump").style.display = atBottom ? "none" : "block";
+  $("#scrollstate").textContent = atBottom ? "" : "scrolled up, paused";
+});
+$("#jump").onclick = () => { follow = true; toBottom(); $("#jump").style.display = "none";
+  $("#scrollstate").textContent = ""; };
+$("#filter").addEventListener("input", redraw);
+$("#hidelisten").addEventListener("change", redraw);
+$("#clear").onclick = () => { entries = []; redraw(); };
+document.querySelectorAll(".chip[data-level]").forEach(c => {
+  c.onclick = () => {
+    const lvl = c.dataset.level;
+    levels[lvl] = !levels[lvl];
+    c.classList.toggle("on", levels[lvl]);
+    redraw();
+  };
+});
+
+function openStream() {
+  const src = new EventSource("/api/logs");
+  src.onopen = () => { $("#logstate").textContent = "streaming"; };
+  src.onmessage = ev => append(JSON.parse(ev.data));
+  src.onerror = () => {
+    $("#logstate").textContent = "stream dropped, retrying";
+  };
+}
+
+/* ------------------------------------------------------- syntax highlight */
+function hlYaml(text) {
+  return text.split("\n").map(line => {
+    const e = esc(line);
+    if (/^\s*#/.test(line)) return '<span class="tok-com">' + e + '</span>';
+    const m = e.match(/^(\s*)(-\s+)?([A-Za-z0-9_.\-]+)(:)(.*)$/);
+    if (!m) return hlValue(e);
+    return m[1] + (m[2] || "") + '<span class="tok-key">' + m[3] + '</span>' +
+      '<span class="tok-pun">:</span>' + hlValue(m[5]);
+  }).join("\n");
+}
+function hlValue(s) {
+  return s
+    .replace(/(\$\{\w+\})/g, '<span class="tok-var">$1</span>')
+    .replace(/(&#39;[^&]*?&#39;|&quot;[^&]*?&quot;)/g, '<span class="tok-str">$1</span>')
+    .replace(/\b(true|false|null|~)\b/g, '<span class="tok-num">$1</span>')
+    .replace(/(?<![\w.-])(-?\d+(?:\.\d+)?)(?![\w.-])/g, '<span class="tok-num">$1</span>')
+    .replace(/(#\s.*)$/, '<span class="tok-com">$1</span>');
+}
+function hlJson(text) {
+  return esc(text).replace(
+    /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?/g,
+    (m, str, colon, lit) => {
+      if (str) return colon
+        ? '<span class="tok-key">' + str + '</span><span class="tok-pun">' + colon + '</span>'
+        : '<span class="tok-str">' + str + '</span>';
+      if (lit) return '<span class="tok-num">' + m + '</span>';
+      return '<span class="tok-num">' + m + '</span>';
+    });
+}
+function hlMarkdown(text) {
+  return esc(text).split("\n").map(l =>
+    /^#{1,6}\s/.test(l) ? '<span class="tok-h">' + l + '</span>' : l).join("\n");
+}
+function highlight(text, kind) {
+  if (kind === "yaml") return hlYaml(text);
+  if (kind === "json") return hlJson(text);
+  return hlMarkdown(text);
+}
+
+/* ------------------------------------------------------------------ config */
+let files = [], openFile = null, openKind = "yaml";
+
+async function loadConfigList() {
+  const r = await fetch("/api/config");
+  const d = await r.json();
+  files = d.files;
+  const groups = [];
+  for (const f of files) {
+    let g = groups.find(x => x.name === f.group);
+    if (!g) { g = { name: f.group, items: [] }; groups.push(g); }
+    g.items.push(f);
+  }
+  $("#filelist").innerHTML = groups.map(g =>
+    '<span class="lbl">' + esc(g.name === "shared" ? "config/" : "profiles/" + g.name + "/") + '</span>' +
+    g.items.map(f => '<button class="filebtn" data-id="' + esc(f.id) + '">' +
+      esc(f.label) + '</button>').join("")).join("");
+  document.querySelectorAll(".filebtn").forEach(b => {
+    b.onclick = () => openConfig(b.dataset.id);
+  });
+  if (!openFile && files.length) openConfig(files[0].id);
+}
+
+async function openConfig(id) {
+  const r = await fetch("/api/config/file?id=" + encodeURIComponent(id));
+  const d = await r.json();
+  if (d.error) { setCfgMsg(d.error, false); return; }
+  openFile = id; openKind = d.kind;
+  document.querySelectorAll(".filebtn").forEach(b =>
+    b.classList.toggle("on", b.dataset.id === id));
+  $("#filename").textContent = d.group === "shared"
+    ? "config/" + d.label : "config/profiles/" + d.group + "/" + d.label;
+  $("#view").innerHTML = highlight(d.text, d.kind);
+  $("#editor").value = d.text;
+  showView();
+  setCfgMsg("", true);
+}
+
+function showView() {
+  $("#view").style.display = "block";
+  $("#editor").style.display = "none";
+  $("#edit").style.display = "inline-block";
+  $("#save").style.display = "none";
+  $("#cancel").style.display = "none";
+}
+function showEdit() {
+  $("#view").style.display = "none";
+  $("#editor").style.display = "block";
+  $("#edit").style.display = "none";
+  $("#save").style.display = "inline-block";
+  $("#cancel").style.display = "inline-block";
+}
+function setCfgMsg(text, ok) {
+  const el = $("#cfgmsg");
+  el.textContent = text;
+  el.className = "msgline " + (text ? (ok ? "ok" : "bad") : "");
+}
+
+$("#edit").onclick = showEdit;
+$("#cancel").onclick = () => { openConfig(openFile); };
+$("#save").onclick = async () => {
+  $("#save").disabled = true;
+  setCfgMsg("saving", true);
+  const r = await fetch("/api/config/file", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: openFile, text: $("#editor").value })
+  });
+  const d = await r.json();
+  $("#save").disabled = false;
+  if (d.error) { setCfgMsg(d.error, false); return; }
+  $("#view").innerHTML = highlight($("#editor").value, openKind);
+  showView();
+  setCfgMsg("saved " + d.saved + ". " + d.note, true);
+};
+$("#rebuild").onclick = async () => {
+  $("#rebuild").disabled = true;
+  setCfgMsg("building the profile and restarting the container", true);
+  const r = await fetch("/api/rebuild", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({})
+  });
+  const d = await r.json();
+  $("#rebuild").disabled = false;
+  setCfgMsg(d.error || d.output || "done", !d.error && d.ok);
+  loadAbilities(); loadVoices();
+};
+
+/* --------------------------------------------------------------- abilities */
+function classify(name) {
+  if (name.startsWith("self_")) return "the cat's body";
+  if (name === "handle_exit_intent" || name === "get_lunar") return "built into the server";
+  return "";
+}
+
+async function loadAbilities() {
+  const r = await fetch("/api/abilities");
+  const d = await r.json();
+  const mcpTools = new Set();
+  for (const s of d.servers) for (const t of s.tools) mcpTools.add(t);
+
+  let html = '<div class="group"><h3>callable right now</h3>';
+  if (d.functions.length) {
+    html += '<p class="note">Read out of the log at ' + esc(d.functions_at) +
+      '. This is the list the server handed the model on the last connection, ' +
+      'so it is what the cat can do rather than what the docs say it can do.</p>';
+    html += d.functions.map(f => {
+      let tag = classify(f);
+      if (!tag && mcpTools.has(f)) tag = "from mcp";
+      return '<div class="tool"><span class="n">' + esc(f) + '</span>' +
+        (tag ? '<span class="tag">' + esc(tag) + '</span>' : '') + '</div>';
+    }).join("");
+  } else {
+    html += '<p class="note">Nothing yet. The list only appears once a cat ' +
+      'connects, real or fake. Try <span style="font-family:var(--mono)">.\\cat.ps1 talk</span>.</p>';
+  }
+  html += '</div>';
+
+  html += '<div class="group"><h3>mcp servers in this profile</h3>';
+  if (d.servers.length) {
+    html += d.servers.map(s => {
+      const kind = s.state === "connected" ? "on" : s.state === "closed" ? "off" : "warn";
+      return '<div class="srv"><div class="head">' + dot(kind) +
+        '<span>' + esc(s.name) + '</span>' +
+        '<span class="tag" style="margin-left:auto">' + esc(s.transport) + '</span></div>' +
+        '<div class="meta">' + esc(s.target) + '</div>' +
+        '<div class="meta">' + esc(s.state) + (s.at ? " at " + esc(s.at) : "") + '</div>' +
+        (s.tools.length ? '<div class="tools">' + s.tools.map(t =>
+          '<div class="tool"><span class="n">' + esc(t) + '</span></div>').join("") + '</div>' : '') +
+        '</div>';
+    }).join("");
+  } else {
+    html += '<p class="note">This profile lists no MCP servers, so everything the ' +
+      'cat can do comes from its own body.</p>';
+  }
+  html += '</div>';
+
+  html += '<div class="group"><h3>bundled plugins, all off</h3>' +
+    '<p class="note">Switched off in config/base.yaml, with the reason for each one ' +
+    'taken from the comment there. Turning one on tells the model it can do ' +
+    'something it will then fail at out loud.</p>' +
+    d.plugins.map(p => '<div class="plug"><span class="n">' + esc(p.name) +
+      '</span><span class="why">' + esc(p.reason) + '</span></div>').join("") +
+    '</div>';
+
+  $("#pane-abilities").innerHTML = html;
+}
+
+/* ------------------------------------------------------------------ voices */
+let voices = [], current = "", currentLang = "";
+let player = new Audio();
+
+async function loadVoices() {
+  const r = await fetch("/api/voices");
+  const d = await r.json();
+  voices = d.voices || [];
+  current = d.current || "";
+  currentLang = d.language || "";
+  $("#curvoice").innerHTML = d.error
+    ? '<span style="color:var(--err)">' + esc(d.error) + '</span>'
+    : "built profile " + esc(d.profile || "none") + " speaks as " +
+      esc(current) + " in " + esc(currentLang);
+  const langs = [...new Set(voices.map(v => v.language))].sort();
+  $("#vlang").innerHTML = '<option value="">any language</option>' +
+    langs.map(l => '<option' + (l === "Chinese" || l === "English" ? "" : "") + '>' +
+      esc(l) + '</option>').join("");
+  renderVoices();
+}
+
+function renderVoices() {
+  const lang = $("#vlang").value, g = $("#vgender").value;
+  const q = $("#vsearch").value.trim().toLowerCase();
+  const list = voices.filter(v =>
+    (!lang || v.language === lang) &&
+    (!g || v.gender === g) &&
+    (!q || v.name.toLowerCase().includes(q)));
+  $("#vcount").textContent = list.length + " of " + voices.length + " voices";
+  $("#vlist").innerHTML = list.map(v =>
+    '<div class="v' + (v.name === current ? " cur" : "") + '" data-v="' + esc(v.name) + '">' +
+    '<button class="play" title="play a sample">&#9654;</button>' +
+    '<span class="nm">' + esc(v.name) + '<small>' + esc(v.language) + '</small></span>' +
+    '<span class="g">' + esc(v.gender.toLowerCase()) + '</span>' +
+    '<button class="use">' + (v.name === current ? "in use" : "use") + '</button>' +
+    '</div>').join("");
+  $("#vlist").querySelectorAll(".v").forEach(row => {
+    row.querySelector(".play").onclick = () => playVoice(row);
+    const use = row.querySelector(".use");
+    use.disabled = row.dataset.v === current;
+    use.onclick = () => useVoice(row.dataset.v, use);
+  });
+}
+
+async function playVoice(row) {
+  const btn = row.querySelector(".play");
+  const text = $("#sample").value.trim();
+  if (!text) return;
+  btn.textContent = "…";
+  player.pause();
+  const url = "/api/tts?voice=" + encodeURIComponent(row.dataset.v) +
+    "&text=" + encodeURIComponent(text);
+  try {
+    const r = await fetch(url);
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({ error: "synthesis failed" }));
+      btn.textContent = "!"; btn.title = d.error || "failed";
+      setTimeout(() => { btn.innerHTML = "&#9654;"; }, 2500);
+      return;
+    }
+    const blob = await r.blob();
+    player = new Audio(URL.createObjectURL(blob));
+    player.onended = () => { btn.innerHTML = "&#9654;"; };
+    await player.play();
+    btn.textContent = "■";
+  } catch (e) {
+    btn.textContent = "!";
+    setTimeout(() => { btn.innerHTML = "&#9654;"; }, 2500);
+  }
+}
+
+async function useVoice(name, btn) {
+  btn.disabled = true;
+  btn.textContent = "…";
+  const r = await fetch("/api/voice", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ voice: name })
+  });
+  const d = await r.json();
+  if (d.error) {
+    btn.textContent = "!"; btn.title = d.error; btn.disabled = false;
+    return;
+  }
+  current = d.voice; currentLang = d.language;
+  $("#curvoice").innerHTML = "wrote voice " + esc(d.voice) + " and language " +
+    esc(d.language) + " into " + esc(d.file) +
+    '. <span style="color:var(--warn)">Rebuild on the config tab to make it live.</span>';
+  renderVoices();
+}
+
+$("#vlang").onchange = renderVoices;
+$("#vgender").onchange = renderVoices;
+$("#vsearch").oninput = renderVoices;
+
+/* -------------------------------------------------------------------- tabs */
+document.querySelectorAll(".tabs button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll(".tabs button").forEach(x => x.classList.remove("on"));
+    document.querySelectorAll(".pane").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    $("#pane-" + b.dataset.tab).classList.add("on");
+  };
+});
+
+/* -------------------------------------------------------------------- boot */
+pollStatus();
+openStream();
+loadConfigList();
+loadAbilities();
+loadVoices();
+setInterval(loadAbilities, 15000);
+</script>
+</body>
+</html>
