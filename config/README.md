@@ -25,6 +25,7 @@ From PowerShell:
 .\cat.ps1 show             # what is running now
 .\cat.ps1 status           # is it up, is the endpoint answering
 .\cat.ps1 logs             # follow the log
+.\cat.ps1 talk             # type at the cat and read what it says back
 ```
 
 From inside WSL, `python3 tools/build_profile.py list | use <name> | show`.
@@ -60,6 +61,25 @@ Secrets are never in this folder. `.env` holds them, and the builder substitutes
 them by name where `base.yaml` or a profile writes `${OPENAI_API_KEY}` or
 `${HOST_LAN_IP}`. If a name is blank in `.env` the build stops and tells you
 which one.
+
+## The language it answers in
+
+The server's prompt template hard-codes an output language, so `language` in
+`base.yaml` decides what the cat replies in, not the system prompt. Both
+profiles set it to English. Override it in a profile alongside a matching voice:
+
+```yaml
+LLM:
+  OpenAILLM:
+    language: Chinese
+TTS:
+  EdgeTTS:
+    voice: zh-CN-XiaoxiaoNeural
+```
+
+Speech recognition needs no such setting. It already understands whatever is
+spoken to it, which is why typing Chinese at an English profile gets an English
+answer to a correctly heard Chinese question.
 
 ## Voices
 

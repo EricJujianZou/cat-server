@@ -76,9 +76,21 @@ and a list of MCP servers. See [config/README.md](config/README.md).
 
 ## Testing without the hardware
 
-`python3 tools/fake_cat.py "what time is it"` connects the way the real device
-does and prints everything the server sends back, including which face it asked
-for and how much audio came out. It needs no microphone and no cat.
+`.\cat.ps1 talk` connects the way the real device does and lets you type at the
+cat, printing everything the server sends back: which face it asked for, every
+sentence it spoke, and how much audio came out. No microphone and no cat needed.
+
+```powershell
+.\cat.ps1 talk                          # type at it until ctrl-c
+.\cat.ps1 talk "what time is it"        # say one thing and exit
+.\cat.ps1 talk --listen                 # watch what the server pushes
+```
+
+Type in whatever language you like. Speech recognition is OpenAI's and handles
+Chinese, but the reply comes back in whatever `language` the profile sets, which
+is English on both profiles today. See [config/README.md](config/README.md).
+
+Inside WSL the same thing is `python3 tools/fake_cat.py`.
 
 ## Where the keys go
 
@@ -162,7 +174,7 @@ Docker Engine runs inside WSL2. Published ports reach Windows `localhost`
 automatically, but the cat connects across the LAN, which needs
 `networkingMode=mirrored` in `%USERPROFILE%\.wslconfig` so WSL shares the host's
 network interface. That is already set, and confirmed working: the Ubuntu distro
-now holds `192.168.4.46` on `eth0`, the same address as Windows.
+now holds the same address on `eth0` that Windows does.
 
 ## Moving to AWS later
 

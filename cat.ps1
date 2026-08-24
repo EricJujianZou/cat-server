@@ -8,13 +8,17 @@
 #   .\cat.ps1 show          what is running now
 #   .\cat.ps1 status        is it up, is it reachable, are the helpers running
 #   .\cat.ps1 logs          follow the server log
+#   .\cat.ps1 talk          type at the cat and read what it says back, no
+#                           hardware and no microphone needed
 #   .\cat.ps1 watch         start the two Windows helpers the claude-voice
 #                           profile needs, detached so they outlive this window
 #   .\cat.ps1 unwatch       stop them again
 
 $ErrorActionPreference = 'Stop'
 $repoWin = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repo    = '/mnt/c/Users/zouju/Coding Projects/cat-server'
+# Same folder, spelled the way WSL sees it, so the script works from wherever
+# it was cloned rather than only from the machine it was written on.
+$repo    = '/mnt/' + $repoWin.Substring(0,1).ToLower() + $repoWin.Substring(2).Replace('\', '/')
 $sub     = if ($args.Count -gt 0) { $args[0] } else { 'help' }
 $rest    = if ($args.Count -gt 1) { $args[1..($args.Count-1)] -join ' ' } else { '' }
 
@@ -35,6 +39,20 @@ function Helper-Running($needle) {
 }
 
 switch ($sub) {
+
+  'talk' {
+    # Type at the server the way the real cat would, so a profile can be tried
+    # without the hardware. Only the output encoding is touched here: setting
+    # [Console]::InputEncoding as well severs a piped stdin, so a line fed in
+    # from a script never reaches the cat.
+    $prevOut = [Console]::OutputEncoding
+    try {
+      [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+      wsl.exe -e sh -c "cd '$repo' && PYTHONIOENCODING=utf-8 python3 tools/fake_cat.py $rest"
+    } finally {
+      [Console]::OutputEncoding = $prevOut
+    }
+  }
 
   'logs' {
     wsl.exe -e sh -c "cd '$repo' && docker compose logs -f --tail 80"

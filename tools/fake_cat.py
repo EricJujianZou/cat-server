@@ -198,6 +198,9 @@ async def run(args):
             line = line.strip()
             if line:
                 await cat.say(line)
+        # Piping a line in rather than typing it closes stdin at once, and
+        # without this the reply is still in flight when the socket shuts.
+        await asyncio.sleep(args.wait if not sys.stdin.isatty() else 0)
     pump.cancel()
     await cat.ws.close()
 
