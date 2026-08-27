@@ -49,11 +49,21 @@ one, so a call against it fails until a cat is connected.
 |---|---|---|
 | `GET /devices` | | which cats are connected |
 | `POST /face` | `{"emoji": "🤔"}` | change the face |
-| `POST /say` | `{"text": "..."}` | speak a sentence out loud |
+| `POST /say` | `{"text": "..."}` | speak a sentence out loud. Refuses with a 409 while the cat is mid-conversation or mid-song, until it has been quiet for `PUSH_QUIET_SECONDS` (default 120, 0 disables). `{"force": true}` overrides. |
 | `POST /raw` | `{"message": {...}}` | send arbitrary JSON down the socket |
 
 `tools/push.py` wraps all of it, and `tools/fake_cat.py` gives you something to
 aim at when the hardware is off.
+
+The bridge also keeps the connection alive. The firmware marks the audio
+channel dead 120 seconds after the last packet it received from the server
+(`protocol.cc`, `kTimeoutSeconds`), and only an application-level frame resets
+that clock, because transport-level websocket pings never reach the firmware's
+application layer. Every 90 seconds the bridge re-sends each live cat the face
+it is already showing, which is invisible on the device and resets the timer.
+Set `PUSH_KEEPALIVE_SECONDS=0` in the container's environment to turn it off.
+The matching server-side timeout is `close_connection_no_voice_time` in
+`config/base.yaml`, raised to a day for the same reason.
 
 There is no authentication. That is acceptable on a laptop behind a home router
 and is not acceptable on a VPS, so put a token in front of it before moving.

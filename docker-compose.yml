@@ -32,3 +32,8 @@ services:
       # MCP servers the profiles can launch. Read only, so the container can run
       # them but nothing in it can rewrite them.
       - ./tools/mcp:/opt/xiaozhi-esp32-server/mcp-tools:ro
+      # Song library for the bundled play_music plugin, which reads ./music
+      # relative to the server's working directory. Drop mp3 or wav files in
+      # music/ on the Windows side; the plugin itself stays off until there is
+      # something in here for it to play.
+      - ./music:/opt/xiaozhi-esp32-server/music:ro

@@ -6,6 +6,7 @@ needs editing to change the cat's personality, voice, model or abilities.
 ```
 config/
   base.yaml                shared by every profile. Server ports, providers, keys.
+  rituals.yaml             what the cat says on its own, and when. Read on Windows.
   profiles/
     desk-cat/
       profile.yaml         voice, model, and anything that overrides base.yaml
@@ -26,6 +27,7 @@ From PowerShell:
 .\cat.ps1 status           # is it up, is the endpoint answering
 .\cat.ps1 logs             # follow the log
 .\cat.ps1 talk             # type at the cat and read what it says back
+.\cat.ps1 rituals          # start the daemon that speaks at the times in rituals.yaml
 ```
 
 From inside WSL, `python3 tools/build_profile.py list | use <name> | show`.
@@ -125,6 +127,41 @@ The plugin folder baked into the server image is switched off in `base.yaml` and
 should stay off. All five bundled plugins are either China-only services or need
 a key nobody here has, so turning one on means the model is told it can do
 something it will then fail at, out loud, mid-sentence.
+
+## rituals.yaml
+
+The one file in this folder the container never reads. `tools/rituals.py`, a
+daemon on the Windows side started with `.\cat.ps1 rituals`, reads it directly,
+so editing it needs no rebuild and no restart. The daemon notices the change
+and reloads within about a minute. A retry window that is already open keeps
+its old settings; the new config applies from the next ritual on.
+[docs/speaking-first.md](../docs/speaking-first.md) explains the daemon itself.
+
+The top level:
+
+| Field | Means |
+|---|---|
+| `bridge` | where the push bridge answers, `http://127.0.0.1:8004` on this machine |
+| `model` | the OpenAI model that turns each prompt into the spoken line |
+| `retry_minutes` | how long to wait between attempts when no cat is connected |
+| `give_up_minutes` | how long to keep trying before recording the ritual as missed |
+| `post_repo` | the repo the `post_check` ritual inspects for a commit made today |
+| `feeds` | the RSS or Atom feeds the `news` ritual pulls headlines from |
+
+Each entry under `rituals`:
+
+| Field | Means |
+|---|---|
+| `time` | local wall clock, `"HH:MM"`, quoted so the colon survives |
+| `enabled` | `false` skips the ritual without deleting it |
+| `prompt` | what the model is asked, and its answer is what the cat says. Words in curly braces are filled in by the daemon first, and each ritual's comment in the file says which ones it gets |
+| `on_done` | `post_check` only. `skip` stays quiet when today's commit exists, `congratulate` speaks `done_prompt` instead |
+| `done_prompt` | `post_check` only, the prompt used when `on_done` is `congratulate` |
+
+The file is read by a small parser inside the daemon rather than a real YAML
+library, because the Windows Python has none installed. It handles exactly the
+constructs already in the file: two space indents, quoted and plain values,
+dash lists, and folded blocks marked with `>`. Stick to those when editing.
 
 ## The cat's face
 

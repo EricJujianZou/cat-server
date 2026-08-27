@@ -1,0 +1,109 @@
+# What the cat says on its own, and when. Read by tools/rituals.py, which runs
+# on Windows and is started with .\cat.ps1 rituals. Nothing in the container
+# reads this file, so editing it needs no rebuild, just a restart of the
+# daemon.
+#
+# Times are the machine's local clock, which on this machine is
+# America/Toronto. The daemon checks twice a minute, so a ritual fires within
+# about thirty seconds of its time. If no cat is connected it retries every
+# retry_minutes for up to give_up_minutes, then records the miss in
+# data/companion.db and waits for the next ritual.
+#
+# A prompt is what the model is asked, not what the cat says. The model turns
+# the prompt into the spoken line, and the words in curly braces are filled in
+# by tools/rituals.py before the model sees them. Each ritual's comment says
+# which ones it gets. If the model cannot be reached the daemon speaks a plain
+# fallback line instead, hardcoded in tools/rituals.py.
+#
+# This file is parsed by a small reader inside tools/rituals.py, because the
+# Windows Python has no yaml module. Stick to what is already here: two space
+# indents, quoted or plain values, dash lists, and folded blocks with >.
+
+bridge: http://127.0.0.1:8004
+model: gpt-4o-mini
+retry_minutes: 5
+give_up_minutes: 45
+
+# The repo the post_check ritual looks at for a commit made today.
+post_repo: C:\Users\zouju\Coding Projects\content-machine
+
+# Feeds the news ritual reads. All three answered when this file was written.
+# Two or three items are taken from each and handed to the model together.
+feeds:
+  - https://feeds.bbci.co.uk/news/world/rss.xml
+  - https://feeds.npr.org/1001/rss.xml
+  - https://www.cbc.ca/webfeed/rss/rss-topstories
+
+# The desk reminder. Not a timed ritual: while the keyboard or mouse is in
+# use the cat asks him to look out the window every remind_minutes, and asks
+# again on the same clock until he tells the cat he looked, which the model
+# records with the looked_outside ledger tool. After away_minutes with no
+# input at all it stays quiet, and the next input starts a fresh clock. The
+# prompt gets {desk_minutes}, how long this stretch at the desk has been.
+presence:
+  enabled: true
+  remind_minutes: 20
+  away_minutes: 60
+  prompt: >
+    Ask him to look out the window and rest his eyes for a minute. He has
+    been at the desk for {desk_minutes} minutes. One or two sentences,
+    friendly, no guilt. Vary the wording.
+
+rituals:
+
+  # Gets {last_weight}, the most recent recorded weight with its date, or the
+  # word none.
+  weight:
+    time: "08:20"
+    enabled: true
+    prompt: >
+      Ask him to step on the scale and tell you the number. One sentence, two
+      at most. His last recorded weight was: {last_weight}.
+
+  # Gets {date}, today's date spelled out, and {yesterday_outcomes}, what he
+  # said he got done yesterday, or the word none.
+  morning_plan:
+    time: "08:30"
+    enabled: true
+    prompt: >
+      Say good morning, mention that today is {date}, and ask what the plan
+      for the day is. If anything in yesterday's outcomes sounds unfinished,
+      mention it in one clause. Two sentences at most. Yesterday's outcomes
+      were: {yesterday_outcomes}.
+
+  # Gets {headlines}, a plain list of story titles pulled from the feeds
+  # above a minute before speaking.
+  news:
+    time: "08:35"
+    enabled: true
+    prompt: >
+      Read him the morning news. Pick the two or three stories that matter
+      most from the headlines below and compress them into at most three
+      spoken sentences. No headline voice, just tell him what happened.
+      Headlines: {headlines}.
+
+  # Gets {today_plan}, what he said this morning, and {week_ago_plan}, the
+  # plan from seven days ago. Either can be the word none.
+  afternoon_review:
+    time: "17:30"
+    enabled: true
+    prompt: >
+      Read back this morning's plan and ask what actually got done. If there
+      was a plan seven days ago, ask in one clause how that week-old item
+      turned out. Three sentences at most. This morning's plan was:
+      {today_plan}. The plan from seven days ago was: {week_ago_plan}.
+
+  # Checks post_repo for a commit made today. With no commit it speaks the
+  # prompt below. With one it stays quiet, or speaks done_prompt if on_done
+  # is set to congratulate instead of skip.
+  post_check:
+    time: "20:00"
+    enabled: true
+    on_done: skip
+    prompt: >
+      Remind him that nothing has been committed to content-machine today and
+      that the post is five minutes of work. Two sentences at most, friendly,
+      no guilt.
+    done_prompt: >
+      He already committed to content-machine today. Say something brief and
+      pleased about it. One sentence.

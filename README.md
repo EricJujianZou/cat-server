@@ -5,10 +5,19 @@ server at `101.35.234.159` and talks to this machine instead.
 
 ## What runs where
 
-The cat holds one WebSocket open to this server and streams compressed audio
-down it. Speech recognition, the model, and speech synthesis all happen here. The
-cat itself only does wake-word detection, echo cancellation, and drawing its own
-face. It never sees text in either direction.
+The cat opens a WebSocket to this server when it is woken and streams compressed
+audio down it. Speech recognition, the model, and speech synthesis all happen
+here. The cat itself only does wake-word detection, echo cancellation, and
+drawing its own face. It never sees text in either direction.
+
+The socket now stays open through idle time, so the server can start a
+conversation without waiting for a wake word: its own silence timeout is
+raised to a day in `config/base.yaml`, and a keepalive in the push bridge
+resets the two minute timer the firmware runs on its side.
+[docs/speaking-first.md](docs/speaking-first.md) covers both timers and what
+the keepalive risks. When the connection does drop, the cat reopens it on the
+next wake word, and the dashboard calls that state idle rather than
+disconnected.
 
 ## Setup
 
@@ -50,10 +59,15 @@ is what the cat on this desk announced, read out of the server log:
 | `self_sys_get_new_message` | read messages the firmware has queued |
 | `self_sys_get_verification_code` | the pairing code for the seller's app, unused here |
 
-Four more come from the server side and are always present: `handle_exit_intent`
-lets the model end the conversation itself, `get_lunar` answers lunar calendar
-questions, and `claude_status` and `claude_sessions` come from the
-`claude-voice` profile's MCP server. Fourteen in total on this setup.
+Fifteen more come from the server side. `handle_exit_intent`, which lets the
+model end the conversation itself, and `get_lunar`, which answers lunar
+calendar questions, are always present. The `claude-voice` profile turns on
+two bundled plugins, `web_search` and `play_music`, and its two MCP servers
+add the other eleven: `claude_status` and `claude_sessions` for watching
+Claude Code, and nine ledger tools for logging plans, outcomes, weight,
+ideas, notes, focus blocks and look-outside acknowledgments, described in
+[docs/speaking-first.md](docs/speaking-first.md). Twenty-five in total on
+this setup.
 
 Two of these are worth knowing about. `self_timer_manage` means kitchen timers
 already work with no server-side work at all. `handle_exit_intent` is why saying
@@ -68,12 +82,12 @@ To see the live list rather than this table, look for `当前支持的函数列�
 the server. There are two routes.
 
 The first is the plugin folder baked into the image: `web_search`, `get_weather`,
-`get_news_from_newsnow`, `play_music`, `change_role`. All of them are turned off
-in `config/base.yaml`, and the comment there says why for each one. Short
-version: three need keys for Chinese services, the bundled music library is three
-Chinese songs, and `change_role` overwrites the English cat persona. Turning any
-of them on means the model is told it can do something it will then fail at, out
-loud, mid-sentence.
+`get_news_from_newsnow`, `play_music`, `change_role`. All of them are off in
+`config/base.yaml`, and the comment there says why for each one. The rule is
+that the model is never told it can do something it will then fail at, out
+loud, mid-sentence. Two have since earned their way on, in `claude-voice`
+only: `web_search` with a Tavily key, and `play_music`, which plays whatever
+is in the repo's `music/` folder through the cat's speaker.
 
 The second route is standard MCP servers, and this is the one worth using. List
 them in a profile's `config/profiles/<name>/mcp.json` in the usual `mcpServers`
@@ -125,6 +139,17 @@ is English on both profiles today. See [config/README.md](config/README.md).
 
 Inside WSL the same thing is `python3 tools/fake_cat.py`.
 
+## Making it speak first
+
+`.\cat.ps1 rituals` starts a Windows daemon that has the cat speak on its own
+at the times in `config/rituals.yaml`: a morning weigh-in, the day's plan, the
+news, an afternoon review of that plan, and an evening check that today's post
+got committed. `rituals stop` and `rituals status` do what they say. When no
+cat is connected at ritual time the daemon retries for forty five minutes and
+then records the miss. [docs/speaking-first.md](docs/speaking-first.md) has
+the whole chain, including the keepalive that holds the connection open long
+enough to be spoken into.
+
 ## Where the keys go
 
 One key does both jobs.
@@ -152,15 +177,16 @@ neither has a key that works here.
 | `web_search` | a Metaso or Tavily key | The image ships the literal string `mk-xxx`. |
 | `get_weather` | a QWeather key and host | The shared key is rate limited and the default city is Guangzhou. |
 | `get_news_from_newsnow` | nothing | The sources are Chinese. |
-| `play_music` | nothing | The bundled library is three Chinese songs. |
+| `play_music` | files in `music/` | On in `claude-voice`. Off elsewhere so an empty library is never promised. |
 | `change_role` | nothing | It replaces the profile's persona with a Chinese one. |
 
 Leaving them on is worse than leaving them off, because the model is told it can
 search and then fails out loud in the middle of a sentence.
 
-Search is the one worth turning on, and it needs a Tavily key. Weather does not
-need a key at all if it goes through an MCP server against Open-Meteo instead of
-the bundled plugin.
+Search is the one worth turning on, and it is: the `claude-voice` profile
+enables `web_search` against Tavily, with the key read from `TAVILY_API_KEY`
+in `.env`. Weather does not need a key at all if it goes through an MCP server
+against Open-Meteo instead of the bundled plugin.
 
 ## Docs
 
@@ -169,8 +195,10 @@ the bundled plugin.
 | [config/README.md](config/README.md) | Every knob, and how to add a profile |
 | [patches/README.md](patches/README.md) | The two mounted files, and what they change |
 | [docs/keeping-it-running.md](docs/keeping-it-running.md) | Why it dies, and the one command that fixes it |
+| [docs/speaking-first.md](docs/speaking-first.md) | How the cat speaks first: the two timeouts, the keepalive, the rituals, the ledger |
 | [docs/slim-image.md](docs/slim-image.md) | 10.6GB down to 1.3GB, what came out and how it was checked |
 | [docs/ccpet-on-the-cat.md](docs/ccpet-on-the-cat.md) | ccpet states on the cat's face, and why not its artwork |
+| [docs/pictures-on-the-screen.md](docs/pictures-on-the-screen.md) | Your own artwork on the screen: what it needs, and what it risks |
 | [docs/voice-into-claude.md](docs/voice-into-claude.md) | What `/voice` is, and what talking back would take |
 | [docs/use-case-research.md](docs/use-case-research.md) | Who this device is actually for, globally |
 | [docs/why-hardware.md](docs/why-hardware.md) | Why not just a phone app, and what the screen would have to become |
@@ -221,23 +249,66 @@ cat's portal. Nothing about the firmware changes.
 ## The dashboard
 
 `.\cat.ps1 dash` starts a local page on `http://127.0.0.1:8080/` and opens it.
-The top of it mirrors `.\cat.ps1 status`: whether the container is up, which
-profile is built, whether the OTA endpoint answers, and whether the two Windows
-helpers are running. Next to that is the device id and address of whatever last
-connected, read out of the log. The rest of the left side is the server log as
-it happens, with a text filter, a level filter, and a switch for the listen
-heartbeats the cat sends every time it opens its microphone.
 
-The panel on the right has three tabs. Under `config` every file in `config/` is
-editable, and one button rebuilds the profile and restarts the server. Under
-`abilities` are the tools the model can call right now, taken from the log
-rather than from the docs, next to the profile's MCP servers and the bundled
-plugins that stay off. Under `voices` is every Edge TTS voice with a play
-button, so one can be heard before it is picked. Choosing a voice writes both
-`voice` and `language` into the active profile, because the server's prompt
-template hard-codes the output language and the two have to match.
+The bar across the top says the one thing worth knowing before anything else:
+whether the server is up, whether the config on disk is what the container is
+running, and when the cat last spoke. Click it for the rest, one cell per fact,
+worst first.
 
-It never opens `.env` or `data/.config.yaml`. The config browser reaches only
-`config/`, where the keys are still `${PLACEHOLDERS}`. Samples are rendered by
-the container's own `edge-tts` and cached under `tools/dashboard/.cache/`,
-which is ignored by git.
+Five places underneath.
+
+**cat** is everything you change, as named fields rather than YAML. Which
+profile is built, the persona, the voice, every tool with a switch, the wake
+phrases, the model. Each field says which file its value came from and opens
+that file if you click it. At the bottom is a list of the things people look for
+here and will not find, with where they actually live, because an absent setting
+looks exactly like one you have not found yet.
+
+Tools come in three groups because three different rules apply. MCP servers from
+the profile's `mcp.json` switch on and off, and switching one off moves it into
+a disabled block rather than deleting it. The five bundled plugins switch too,
+each next to the reason it is off. The cat's own `self.*` tools are read only
+with the description the firmware gave them, because nothing on this side
+configures those.
+
+**voices** is every Edge TTS voice with a play button. The Chinese ones are split
+by what they actually speak, so `zh-HK` reads as Cantonese and `zh-CN` as
+Mandarin, and the audition text changes to match. Choosing a voice writes both
+`voice` and `language` into the profile, because the server hardcodes the output
+language into its prompt and a Cantonese voice reading Mandarin is nobody's
+language. If the two ever disagree the page says so in red.
+
+**progress** is the ledger in `data/companion.db`, read and never written.
+It shows the weight readings, each day's plan next to what actually got done
+with the model's completion estimate, the thirty day completion rate, focus
+blocks, past ideas, and the rituals that were missed because no cat was
+connected. There are no controls here, because the way to put a row in this
+tab is to tell the cat something.
+
+**log** is the server log as it happens, with a text filter, a level filter, and
+a switch for the listen heartbeats the cat sends every time it opens its
+microphone.
+
+**files** is the raw editor, every file under `config/`, for the things no form
+will ever cover.
+
+Along the bottom is a test box. Type what you would say out loud and it connects
+the way the cat does, then shows the reply, which face the server picked, every
+tool the model called with its arguments, and how much audio came back. It is
+the only way to see a tool call, and it is how you check that a change worked
+without leaving the page. There is a button to hear the reply, which
+re-synthesises the text with the profile's voice rather than replaying what the
+cat received, and says so.
+
+Rebuilding is a button in the top right and a banner when something is unbuilt.
+The banner is worked out from a hash of `config/` against a stamp the builder
+writes, so it survives a reload, notices an edit made in an editor, and clears
+itself when you rebuild from PowerShell. Undo the edit and it goes away on its
+own. While a rebuild runs the page shows which of the four steps it is on, and
+it calls the job done only when the server answers on 8003 again rather than
+when the subprocess exits.
+
+It never opens `.env` or `data/.config.yaml`. Everything the form reads and
+writes is under `config/`, where the keys are still `${PLACEHOLDERS}`. Samples
+are rendered by the container's own `edge-tts` and cached under
+`tools/dashboard/.cache/`, which is ignored by git.

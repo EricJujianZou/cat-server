@@ -21,18 +21,21 @@ Usage:
     python3 tools/build_profile.py show
 """
 
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG = os.path.join(ROOT, "config")
 PROFILES = os.path.join(CONFIG, "profiles")
 DATA = os.path.join(ROOT, "data")
 ACTIVE = os.path.join(DATA, ".active-profile")
+STAMP = os.path.join(DATA, ".build-stamp")
 
 try:
     import yaml
@@ -42,6 +45,35 @@ except ImportError:
         "already installed. From PowerShell use .\\cat.ps1 instead, which shells\n"
         "into WSL for you."
     )
+
+
+def source_hash(name):
+    """A fingerprint of everything that goes into a build.
+
+    Only files under config/ are read, so this never touches .env or the built
+    config, and the hash is the same on any machine with the same source. It is
+    what lets the dashboard say "you edited something and have not rebuilt"
+    without comparing timestamps, which lie: rebuilding an unchanged profile
+    moves the mtime without changing the outcome.
+    """
+    h = hashlib.sha256()
+    paths = [os.path.join(CONFIG, "base.yaml")]
+    pdir = os.path.join(PROFILES, name)
+    if os.path.isdir(pdir):
+        paths += [os.path.join(pdir, f) for f in sorted(os.listdir(pdir))]
+    for path in paths:
+        if not os.path.isfile(path):
+            continue
+        h.update(os.path.basename(path).encode("utf-8"))
+        h.update(open(path, "rb").read())
+    return h.hexdigest()[:16]
+
+
+def read_stamp():
+    try:
+        return json.load(open(STAMP, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def read_env():
@@ -185,16 +217,27 @@ def cmd_use(name):
     with open(ACTIVE, "w", encoding="utf-8", newline="\n") as f:
         f.write(name + "\n")
 
+    with open(STAMP, "w", encoding="utf-8", newline="\n") as f:
+        json.dump({"profile": name, "hash": source_hash(name), "at": time.time()},
+                  f, indent=2)
+        f.write("\n")
+
     print(f"built profile {name!r}")
     print(f"  voice:  {merged.get('TTS', {}).get('EdgeTTS', {}).get('voice', '?')}")
     print(f"  model:  {merged.get('LLM', {}).get('OpenAILLM', {}).get('model_name', '?')}")
     print(f"  mcp:    {', '.join(servers) if servers else 'none'}")
     print()
-    restart()
+    if not restart():
+        # A restart that failed leaves the container on the old build, so this
+        # must not exit zero. The dashboard reads the exit code to decide
+        # whether to clear its "not live yet" banner, and so does any script.
+        sys.exit(1)
 
 
 def restart():
-    """Restart the container if docker is reachable, otherwise say so."""
+    """Restart the container if docker is reachable, otherwise say so.
+
+    Returns True only when the container actually came back."""
     try:
         r = subprocess.run(
             ["docker", "compose", "restart"],
@@ -206,12 +249,13 @@ def restart():
     except (FileNotFoundError, subprocess.TimeoutExpired):
         print("docker not reachable from here. Restart it yourself with:")
         print("    docker compose restart")
-        return
+        return False
     if r.returncode == 0:
         print("cat-server restarted, the new profile is live")
-    else:
-        print("docker compose restart failed:")
-        print(r.stderr.strip()[:500])
+        return True
+    print("docker compose restart failed:")
+    print(r.stderr.strip()[:500])
+    return False
 
 
 def main():

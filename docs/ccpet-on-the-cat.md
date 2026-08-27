@@ -7,12 +7,16 @@ pictures cannot. The states can, and they do.
 
 The cat's screen is drawn by its own firmware, not by the server. The server's
 only screen channel is an emoji, and the firmware maps that emoji to one of 21
-faces it already holds. Nothing else reaches the screen. Arbitrary artwork would
-mean reflashing the device, which is exactly what this whole setup exists to
-avoid.
+faces it already holds. Nothing else reaches the screen in normal operation.
 
 The full list is in `config/README.md`. ccpet's own poses have no equivalent
 there, so what transfers is the meaning rather than the drawing.
+
+There may be a way around this that does not need a reflash. The v2 firmware
+holds two tools it hides from the model, one that draws an image from a URL and
+one that swaps the whole emoji set, and both are reachable over the socket the
+cat already holds. Whether this vendor build kept them is a one command check.
+See [pictures-on-the-screen.md](pictures-on-the-screen.md).
 
 ## The mapping
 

@@ -27,3 +27,21 @@ TTS:
 LLM:
   OpenAILLM:
     model_name: gpt-4o-mini
+
+# Two bundled plugins are on in this profile, and only this one: desk-cat
+# stays the no-tools fallback. web_search goes through Tavily. play_music
+# plays files from the repo's music/ folder, mounted into the container, and
+# it only earned its place here once that folder had songs in it. The
+# functions list replaces base.yaml's empty one outright.
+Intent:
+  function_call:
+    functions:
+      - web_search
+      - play_music
+
+plugins:
+  web_search:
+    provider: tavily
+    description: "联网搜索工具。当用户问到新闻、时事、或任何需要最新信息才能回答的问题时使用。"
+    max_results: 5
+    api_key: ${TAVILY_API_KEY}

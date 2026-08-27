@@ -13,9 +13,16 @@
 #   .\cat.ps1 watch         start the two Windows helpers the claude-voice
 #                           profile needs, detached so they outlive this window
 #   .\cat.ps1 unwatch       stop them again
-#   .\cat.ps1 dash          open the dashboard in a browser: status, the log
-#                           as it happens, config, and every voice with a
-#                           play button
+#   .\cat.ps1 rituals       start the daemon that makes the cat speak first at
+#                           the times in config/rituals.yaml, detached like the
+#                           watch helpers. `rituals stop` and `rituals status`
+#                           do what they say
+#   .\cat.ps1 dash          open the dashboard in a browser: what the cat is,
+#                           every setting as a named field, the log, the voices,
+#                           and a box to test a change without the hardware
+#   .\cat.ps1 screen        ask the connected cat whether its firmware can draw
+#                           your own images. Read only. See
+#                           docs/pictures-on-the-screen.md
 
 $ErrorActionPreference = 'Stop'
 $repoWin = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -92,14 +99,61 @@ switch ($sub) {
     }
   }
 
+  'rituals' {
+    # The daemon that makes the cat speak first, at the times listed in
+    # config/rituals.yaml. It runs on Windows like the watch helpers, because
+    # that is where the sibling repo and the local clock are.
+    $script = 'tools\rituals.py'
+    switch ($rest) {
+      'stop' {
+        $found = Helper-Running 'rituals'
+        foreach ($p in $found) {
+          Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+          Write-Host "stopped: $script"
+        }
+        if ($found.Count -eq 0) { Write-Host "not running: $script" }
+      }
+      'status' {
+        $state = if ((Helper-Running 'rituals').Count -gt 0) { 'running' } else { 'stopped, start it with .\cat.ps1 rituals' }
+        Write-Host "rituals daemon: $state"
+      }
+      default {
+        if ((Helper-Running 'rituals').Count -gt 0) {
+          Write-Host "already running: $script"
+        } else {
+          $py = Get-Py
+          # Same quoting dance as `watch`: the repo path has a space in it.
+          $argList = @($py[1..($py.Count-1)]) + @('"' + (Join-Path $repoWin $script) + '"')
+          Start-Process -FilePath $py[0] -ArgumentList $argList `
+            -WorkingDirectory $repoWin -WindowStyle Hidden
+          Write-Host "started: $script  (speaks the rituals in config/rituals.yaml)"
+        }
+      }
+    }
+  }
+
   'status' {
     wsl.exe -e sh -c "cd '$repo' && docker ps --filter name=cat-server --format 'container: {{.Status}}' && python3 tools/build_profile.py show && curl -s -m 5 -o /dev/null -w 'ota endpoint: %{http_code}\n' http://127.0.0.1:8003/xiaozhi/ota/"
     foreach ($h in @(
-      @{ needle = 'claude_status_agent'; label = 'status agent' },
-      @{ needle = 'claude_watch';        label = 'face watcher' }
+      @{ needle = 'claude_status_agent'; label = 'status agent';   start = 'watch' },
+      @{ needle = 'claude_watch';        label = 'face watcher';   start = 'watch' },
+      @{ needle = 'rituals';             label = 'rituals';        start = 'rituals' }
     )) {
-      $state = if ((Helper-Running $h.needle).Count -gt 0) { 'running' } else { 'stopped, start it with .\cat.ps1 watch' }
+      $state = if ((Helper-Running $h.needle).Count -gt 0) { 'running' } else { "stopped, start it with .\cat.ps1 $($h.start)" }
       Write-Host ("{0,-14}{1}" -f ($h.label + ':'), $state)
+    }
+  }
+
+  'screen' {
+    # Asks the cat for the tools it hides from the model, two of which would put
+    # custom artwork on its screen. It has to be connected, and it hangs up a
+    # few minutes after a conversation, so wake it first.
+    $prevOut = [Console]::OutputEncoding
+    try {
+      [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+      wsl.exe -e sh -c "cd '$repo' && PYTHONIOENCODING=utf-8 python3 tools/probe_screen.py $rest"
+    } finally {
+      [Console]::OutputEncoding = $prevOut
     }
   }
 

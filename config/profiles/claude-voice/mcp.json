@@ -2,7 +2,15 @@
   "mcpServers": {
     "claude-code": {
       "command": "python",
-      "args": ["/opt/xiaozhi-esp32-server/mcp-tools/claude_mcp.py"]
+      "args": [
+        "/opt/xiaozhi-esp32-server/mcp-tools/claude_mcp.py"
+      ]
+    },
+    "companion": {
+      "command": "python",
+      "args": [
+        "/opt/xiaozhi-esp32-server/mcp-tools/companion_mcp.py"
+      ]
     }
   }
 }

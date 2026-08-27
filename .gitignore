@@ -13,5 +13,10 @@ tmp/
 # firmware images
 *.bin
 
+# the song library is personal, only its README is committed
+music/*
+!music/README.md
+
 # extracted from the image for diffing, not ours
 patches/connection.py.orig
+__pycache__/

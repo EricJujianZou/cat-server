@@ -16,6 +16,8 @@ browser only ever touches config/, where the values are still ${PLACEHOLDERS}.
 """
 
 import ast
+import asyncio
+import calendar
 import hashlib
 import http.server
 import json
@@ -24,6 +26,7 @@ import queue
 import re
 import socket
 import socketserver
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -38,6 +41,17 @@ CONFIG = os.path.join(ROOT, "config")
 PROFILES = os.path.join(CONFIG, "profiles")
 DATA = os.path.join(ROOT, "data")
 CACHE = os.path.join(HERE, ".cache")
+
+# tools/ holds the builder, this folder holds the settings form's two helpers.
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+sys.path.insert(0, HERE)
+import build_profile as bp        # noqa: E402
+import settings_api               # noqa: E402
+
+# The fake cat that .\cat.ps1 talk and the test box both connect as. It shares
+# the real handler, so without this it registers on the push bridge and the
+# dashboard announces that a cat is connected when only the test rig is.
+FAKE_DEVICE_ID = "aa:bb:cc:dd:ee:ff"
 
 HOST = "127.0.0.1"
 PORT = 8080
@@ -67,6 +81,11 @@ RE_FUNCS = re.compile(r"当前支持的函数列表:\s*(\[.*\])\s*$")
 RE_MCP_INIT = re.compile(r"初始化服务端MCP客户端:\s*(\S+)")
 RE_MCP_UP = re.compile(r"服务端MCP客户端已连接，可用工具:\s*(\[.*\])\s*$")
 RE_MCP_DOWN = re.compile(r"服务端MCP客户端已关闭:\s*(\S+)")
+# The cat answers tools/list with a full description for every tool it owns.
+# The server then logs only the names, so the descriptions are read out of the
+# raw message instead. This is where "what does self_timer_manage actually do"
+# comes from, rather than from a table in the README that can drift.
+RE_MCP_MSG = re.compile(r"收到mcp消息[:：]\s*(\{.*\})\s*$")
 RELEASED = "连接资源已释放"
 
 # The cat sends one of these every time it opens or closes the microphone, which
@@ -75,6 +94,25 @@ LISTEN_NOISE = re.compile(r"收到listen消息|收到audio|listen消息")
 
 BUFFER_LINES = 2000
 REPLAY_LINES = 400
+# How far back to read when the stream opens. A real cat sends a listen
+# heartbeat every time it opens its microphone, so the line announcing which
+# tools it owns scrolls out of a few hundred lines within one conversation.
+# Reading deeper is what stops the dashboard claiming nothing has ever
+# connected on a desk where the cat has been talking all morning.
+DERIVE_LINES = 6000
+
+
+def stamp_epoch(stamp):
+    """`260824 15:59:15` from the container log into a unix time.
+
+    The container and the host share a clock and a timezone, so this compares
+    against time.time() directly. Returns None for the continuation lines that
+    carry no stamp of their own.
+    """
+    try:
+        return time.mktime(time.strptime(stamp, "%y%m%d %H:%M:%S"))
+    except (ValueError, TypeError):
+        return None
 
 
 class LogHub:
@@ -94,11 +132,26 @@ class LogHub:
         self.state = {
             "device": None,
             "connected": False,
+            # The cat does not hold the socket open. It dials in when it is
+            # woken and hangs up when the conversation ends, so "not connected"
+            # is the normal resting state of a cat that is switched on and
+            # working. These two carry the times that tell the difference.
+            "opened_at": None,
+            "closed_at": None,
+            "test_device": None,
             "functions": [],
             "functions_at": None,
             "mcp": {},
+            # tool name -> one line of what it does, straight off the device
+            "tool_docs": {},
+            # Tools the firmware marks audience:["user"]. They are hidden from
+            # the model on purpose and only appear once something asks with
+            # with_user_tools, which tools/probe_screen.py does.
+            "user_tools": {},
+            "firmware": None,
         }
         self._pending_mcp = None
+        self._last_open_was_real = True
 
     def start(self):
         t = threading.Thread(target=self._run, daemon=True)
@@ -109,7 +162,7 @@ class LogHub:
             try:
                 proc = subprocess.Popen(
                     ["docker", "compose", "logs", "-f", "--no-color",
-                     "--tail", str(REPLAY_LINES)],
+                     "--tail", str(DERIVE_LINES)],
                     cwd=ROOT,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -175,7 +228,7 @@ class LogHub:
             for q in dead:
                 self.subscribers.remove(q)
 
-    def _derive(self, msg, stamp=""):
+    def _derive(self, msg, stamp=""):  # noqa: C901
         at = stamp.split(" ")[-1] if stamp else time.strftime("%H:%M:%S")
         m = RE_HEADERS.search(msg)
         if m:
@@ -184,8 +237,16 @@ class LogHub:
                 headers = ast.literal_eval(blob)
             except (ValueError, SyntaxError):
                 headers = {}
+            device_id = headers.get("device-id", "unknown")
+            if device_id == FAKE_DEVICE_ID:
+                # The test box and cat.ps1 talk both dial in as this. Letting
+                # it overwrite the record would replace the real cat's identity
+                # on the status bar every time a change is tested.
+                self.state["test_device"] = {"ip": ip, "at": at}
+                self._last_open_was_real = False
+                return
             self.state["device"] = {
-                "device_id": headers.get("device-id", "unknown"),
+                "device_id": device_id,
                 "client_id": headers.get("client-id", ""),
                 "ip": ip,
                 "host": headers.get("host", ""),
@@ -193,9 +254,17 @@ class LogHub:
                 "at": at,
             }
             self.state["connected"] = True
+            self.state["opened_at"] = stamp_epoch(stamp) or time.time()
+            self._last_open_was_real = True
             return
         if RELEASED in msg:
+            # The release line carries no device id, so it is attributed to
+            # whoever opened last. Without this a test from the dashboard would
+            # move "last spoke" on the real cat.
+            if not self._last_open_was_real:
+                return
             self.state["connected"] = False
+            self.state["closed_at"] = stamp_epoch(stamp) or time.time()
             return
         m = RE_FUNCS.search(msg)
         if m:
@@ -204,6 +273,10 @@ class LogHub:
                 self.state["functions_at"] = at
             except (ValueError, SyntaxError):
                 pass
+            return
+        m = RE_MCP_MSG.search(msg)
+        if m:
+            self._read_device_mcp(m.group(1))
             return
         m = RE_MCP_INIT.search(msg)
         if m:
@@ -228,6 +301,39 @@ class LogHub:
             rec = self.state["mcp"].setdefault(name, {"tools": []})
             rec["connected"] = False
             rec["at"] = at
+
+    def _read_device_mcp(self, blob):
+        """Pull tool descriptions and the firmware name out of the cat's own
+        MCP replies. Anything unexpected in here is ignored on purpose: this is
+        a nicety on top of the name list, never a reason to drop a log line."""
+        try:
+            payload = json.loads(blob).get("payload") or {}
+            result = payload.get("result") or {}
+        except (ValueError, AttributeError):
+            return
+        info = result.get("serverInfo")
+        if isinstance(info, dict) and info.get("name"):
+            self.state["firmware"] = {
+                "name": info.get("name", ""),
+                "version": info.get("version", ""),
+            }
+        tools = result.get("tools")
+        if not isinstance(tools, list):
+            return
+        for tool in tools:
+            if not isinstance(tool, dict) or not tool.get("name"):
+                continue
+            # The server renames self.foo.bar to self_foo_bar before it hands
+            # the list to the model, so key on the renamed form.
+            key = tool["name"].replace(".", "_")
+            text = (tool.get("description") or "").strip()
+            first = text.splitlines()[0].strip() if text else ""
+            if len(first) > 150:
+                first = first[:147].rstrip() + "..."
+            self.state["tool_docs"][key] = first
+            audience = ((tool.get("annotations") or {}).get("audience")) or []
+            if "user" in audience:
+                self.state["user_tools"][key] = first
 
     def subscribe(self):
         q = queue.Queue(maxsize=4000)
@@ -304,6 +410,54 @@ def merged_tts(profile):
     return out
 
 
+def container_started():
+    """When the running container last came up, as a unix time."""
+    code, out, _ = run(
+        ["docker", "inspect", "-f", "{{.State.StartedAt}}", "cat-server"], timeout=10)
+    if code != 0 or not out.strip():
+        return None
+    text = out.strip().split(".")[0].rstrip("Z")
+    try:
+        # Docker reports this in UTC. timegm reads a UTC struct as UTC;
+        # mktime would read it as local and land an hour out under DST.
+        return calendar.timegm(time.strptime(text, "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return None
+
+
+def build_state():
+    """Whether what is under config/ is what the container is running.
+
+    Three separate facts, because they fail separately: the source can be ahead
+    of the last build, and a build can be ahead of the last container start.
+    Both are computed from a hash of config/ against the stamp the builder
+    writes, so an unchanged rebuild does not read as drift the way an mtime
+    comparison would.
+    """
+    profile = active_profile()
+    stamp = bp.read_stamp()
+    started = container_started()
+    now_hash = bp.source_hash(profile) if profile else ""
+    built_hash = stamp.get("hash", "")
+    built_at = stamp.get("at")
+    # A build from before the stamp existed leaves data/ populated and the
+    # stamp empty. That is not the same as never having built, so it says
+    # "unknown" and waits for the next rebuild rather than raising an alarm.
+    built_before_stamps = not built_hash and os.path.exists(
+        os.path.join(DATA, ".config.yaml"))
+    return {
+        "profile": profile,
+        "built_profile": stamp.get("profile"),
+        "edited": bool(profile) and bool(built_hash) and now_hash != built_hash,
+        "never_built": bool(profile) and not built_hash and not built_before_stamps,
+        "unknown": bool(built_before_stamps),
+        "profile_switched": bool(stamp.get("profile")) and stamp["profile"] != profile,
+        "stale_container": bool(built_at and started and started < built_at - 2),
+        "built_at": built_at,
+        "started_at": started,
+    }
+
+
 # ------------------------------------------------------------ status polling
 
 class Status:
@@ -346,16 +500,34 @@ class Status:
             ).get("description", "")
 
         bridge_devices = None
+        test_devices = []
         try:
             with urllib.request.urlopen(BRIDGE_URL, timeout=2) as r:
-                bridge_devices = json.loads(r.read().decode()).get("devices", [])
+                all_devices = json.loads(r.read().decode()).get("devices", [])
+            test_devices = [d for d in all_devices if d == FAKE_DEVICE_ID]
+            bridge_devices = [d for d in all_devices if d != FAKE_DEVICE_ID]
         except Exception:
             bridge_devices = None
 
         st = LOGS.state
         connected = st["connected"]
         if bridge_devices is not None:
+            # The push bridge holds the live socket registry, so it beats the
+            # log whenever it answers.
             connected = len(bridge_devices) > 0
+
+        # talking: a socket is open this second.
+        # idle:    it has dialled in before and hung up, which is the resting
+        #          state of a cat that is switched on and working fine.
+        # never:   nothing has reached the server since it started.
+        last = max(x for x in [st["opened_at"] or 0, st["closed_at"] or 0])
+        if connected:
+            link = "talking"
+        elif st["device"]:
+            link = "idle"
+        else:
+            link = "never"
+        since = int(time.time() - last) if last else None
 
         tts = merged_tts(profile)
         return {
@@ -367,9 +539,13 @@ class Status:
             "profiles": list_profiles(),
             "ota": http_code(OTA_URL),
             "bridge": bridge_devices,
+            "test_cat": bool(test_devices),
+            "build": build_state(),
             "helpers": helpers,
             "device": st["device"],
             "connected": connected,
+            "link": link,
+            "since": since,
             "voice": tts.get("voice", ""),
             "language": tts.get("language", ""),
             "log_stream": LOGS.alive,
@@ -416,6 +592,270 @@ def windows_helpers():
 STATUS = Status()
 
 
+# ------------------------------------------------------------- the test box
+
+# The one exchange the dashboard runs to answer "did that change work".
+#
+# It dials the server exactly the way the cat does, sends the text the cat's
+# speech recognition would have produced, and reports what came back: the
+# sentences, the face, and every tool the model called with its arguments.
+# Tool calls are the only way a tool toggle can be checked at all, and nothing
+# else in this dashboard shows them.
+#
+# The audio comes back as Opus frames, which this does not decode. It counts
+# them, which proves synthesis ran. To actually hear the profile's voice the
+# page re-synthesises the reply text through /api/tts, and says so, because
+# that is not the audio the cat produced.
+
+TALK_URL = "ws://127.0.0.1:8000/xiaozhi/v1/"
+
+
+def talk_once(text, wait=30.0):
+    return asyncio.run(_talk(text, max(5.0, min(wait, 90.0))))
+
+
+async def _talk(text, wait):
+    import uuid
+    try:
+        import websockets
+    except ImportError:
+        return {"error": "the websockets package is missing in here. "
+                         "pip3 install websockets"}
+    try:
+        from fake_cat import DEVICE_TOOLS
+    except ImportError:
+        DEVICE_TOOLS = []
+
+    started = time.time()
+    out = {"said": [], "face": None, "body": [], "frames": 0, "bytes": 0,
+           "other": [], "error": None}
+
+    headers = {"device-id": FAKE_DEVICE_ID, "client-id": str(uuid.uuid4()),
+               "protocol-version": "1"}
+    try:
+        ws = await asyncio.wait_for(
+            websockets.connect(TALK_URL, additional_headers=headers, max_size=None),
+            timeout=8)
+    except Exception as exc:
+        return {"error": "could not reach the server on 8000: " + str(exc)}
+
+    async def send(obj):
+        await ws.send(json.dumps(obj, ensure_ascii=False))
+
+    try:
+        await send({"type": "hello", "version": 1, "transport": "websocket",
+                    "features": {"mcp": True},
+                    "audio_params": {"format": "opus", "sample_rate": 16000,
+                                     "channels": 1, "frame_duration": 60}})
+        asked = False
+        quiet_until = None
+        deadline = started + wait
+        while time.time() < deadline:
+            left = deadline - time.time()
+            if quiet_until:
+                left = min(left, max(0.05, quiet_until - time.time()))
+                if time.time() >= quiet_until:
+                    break
+            try:
+                raw = await asyncio.wait_for(ws.recv(), timeout=max(0.1, left))
+            except asyncio.TimeoutError:
+                if quiet_until:
+                    break
+                continue
+            if isinstance(raw, bytes):
+                out["frames"] += 1
+                out["bytes"] += len(raw)
+                continue
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                continue
+            kind = msg.get("type")
+            if kind == "hello":
+                await send({"type": "mcp", "payload": {
+                    "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {"protocolVersion": "2024-11-05",
+                               "capabilities": {"tools": {}},
+                               "clientInfo": {"name": "cat-dash", "version": "1"}}}})
+                if not asked:
+                    asked = True
+                    await asyncio.sleep(0.6)
+                    await send({"type": "listen", "mode": "manual",
+                                "state": "detect", "text": text, "source": "text"})
+            elif kind == "llm":
+                out["face"] = {"emoji": msg.get("text", ""),
+                               "emotion": msg.get("emotion", "")}
+            elif kind == "tts":
+                state = msg.get("state")
+                if state == "sentence_start" and msg.get("text"):
+                    out["said"].append(msg["text"])
+                    quiet_until = None
+                elif state == "stop" and out["said"]:
+                    # More sentences often follow, so hold briefly rather than
+                    # cutting the reply off at the first full stop.
+                    quiet_until = time.time() + 1.8
+            elif kind == "mcp":
+                payload = msg.get("payload") or {}
+                method = payload.get("method")
+                if method == "tools/list":
+                    await send({"type": "mcp", "payload": {
+                        "jsonrpc": "2.0", "id": payload.get("id"),
+                        "result": {"tools": DEVICE_TOOLS}}})
+                elif method == "tools/call":
+                    params = payload.get("params") or {}
+                    out["body"].append({"name": params.get("name", ""),
+                                        "args": params.get("arguments") or {}})
+                    await send({"type": "mcp", "payload": {
+                        "jsonrpc": "2.0", "id": payload.get("id"),
+                        "result": {"content": [{"type": "text", "text": "ok"}],
+                                   "isError": False}}})
+            elif kind == "goodbye":
+                break
+            elif kind not in ("stt", "listen"):
+                out["other"].append(kind or "?")
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+    out["seconds"] = round(time.time() - started, 1)
+    if not out["said"] and not out["error"]:
+        out["error"] = ("nothing came back within " + str(int(wait)) +
+                        " seconds. The container may still be starting.")
+    return out
+
+
+# ----------------------------------------------------------------- progress
+
+# The ledger behind the progress tab. The companion MCP server inside the
+# container writes it when the owner talks, and the daemon that speaks the
+# scheduled prompts writes its own rows into the same table. This side only
+# ever reads: query_only is set on every connection, and the existence check
+# in progress_payload keeps a plain connect from creating an empty file.
+# A missing file just means nothing has been logged yet.
+COMPANION_DB = os.path.join(DATA, "companion.db")
+
+
+def companion_rows(path):
+    # Not mode=ro: the ledger is in WAL mode on a Windows mount, and a
+    # read-only connection cannot set up the WAL shared memory there, which
+    # surfaces as "disk I/O error". query_only keeps the no-writes guarantee.
+    conn = sqlite3.connect(path, timeout=5)
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        return conn.execute(
+            "SELECT ts, kind, text, data FROM log ORDER BY id").fetchall()
+    finally:
+        conn.close()
+
+
+def progress_payload(path=COMPANION_DB):
+    """Everything the progress tab renders, in one payload."""
+    if not os.path.exists(path):
+        return {"exists": False}
+    try:
+        rows = companion_rows(path)
+    except sqlite3.Error as exc:
+        return {"exists": True, "error": str(exc)}
+
+    def blob(raw):
+        try:
+            doc = json.loads(raw)
+            return doc if isinstance(doc, dict) else {}
+        except ValueError:
+            return {}
+
+    weights, ideas, focus, days = [], [], [], {}
+    cutoff_30 = time.strftime(
+        "%Y-%m-%d", time.localtime(time.time() - 29 * 86400))
+    completions = []
+    for ts, kind, text, raw in rows:
+        day = ts[:10]
+        data = blob(raw)
+        if kind == "weight" and isinstance(data.get("kg"), (int, float)):
+            weights.append({"ts": ts, "day": day, "kg": data["kg"]})
+        elif kind == "idea":
+            ideas.append({"ts": ts, "day": day, "text": text})
+        elif kind == "focus":
+            focus.append({
+                "ts": ts, "day": day, "intent": text,
+                "minutes": data.get("minutes"),
+                "open": bool(data.get("open")),
+                "completed": bool(data.get("completed")),
+                "outcome": data.get("outcome", ""),
+            })
+        elif kind in ("plan", "outcome", "missed"):
+            rec = days.setdefault(day, {
+                "day": day, "plan": "", "outcome": "",
+                "completion": None, "missed": []})
+            if kind == "plan":
+                rec["plan"] = (rec["plan"] + " / " + text).strip(" /")
+            elif kind == "outcome":
+                rec["outcome"] = (rec["outcome"] + " / " + text).strip(" /")
+                if isinstance(data.get("completion"), (int, float)):
+                    rec["completion"] = data["completion"]
+                    if day >= cutoff_30:
+                        completions.append(data["completion"])
+            else:
+                rec["missed"].append(text)
+
+    rate = None
+    if completions:
+        rate = {"avg": sum(completions) / len(completions),
+                "count": len(completions)}
+    return {
+        "exists": True,
+        "weights": weights,
+        "days": sorted(days.values(), key=lambda r: r["day"], reverse=True)[:30],
+        "rate30": rate,
+        "focus": list(reversed(focus))[:30],
+        "ideas": list(reversed(ideas))[:100],
+    }
+
+
+# ----------------------------------------------------------------- rituals
+
+# What the cat says on its own. The daemon (tools/rituals.py, started with
+# .\cat.ps1 rituals) reads config/rituals.yaml twice a minute and rewrites
+# data/.rituals-heartbeat on every tick, so a heartbeat younger than three
+# ticks means it is running. Nothing in the container is involved: an edit to
+# the file needs no rebuild, the daemon just picks it up.
+RITUALS_YAML = os.path.join(CONFIG, "rituals.yaml")
+RITUALS_HEARTBEAT = os.path.join(DATA, ".rituals-heartbeat")
+
+
+def rituals_payload():
+    doc = load_yaml(RITUALS_YAML)
+    rows = []
+    for name, rec in (doc.get("rituals") or {}).items():
+        if not isinstance(rec, dict):
+            continue
+        prompt = " ".join(str(rec.get("prompt", "")).split())
+        if len(prompt) > 110:
+            prompt = prompt[:107].rstrip() + "..."
+        rows.append({
+            "name": name,
+            "time": str(rec.get("time", "")),
+            "enabled": bool(rec.get("enabled", True)),
+            "what": prompt,
+        })
+    age, running, poll = None, False, 30
+    try:
+        hb = json.load(open(RITUALS_HEARTBEAT, encoding="utf-8"))
+        poll = int(hb.get("poll_seconds") or 30)
+        age = int(time.time() - time.mktime(
+            time.strptime(hb.get("ts", ""), "%Y-%m-%dT%H:%M:%S")))
+        running = age < 90
+    except (OSError, ValueError, TypeError, OverflowError):
+        pass
+    return {
+        "file": "config/rituals.yaml",
+        "list": rows,
+        "daemon": {"running": running, "age": age, "poll": poll},
+    }
+
+
 # ------------------------------------------------------------- config browser
 
 # An explicit whitelist. The client sends an id from this map and nothing else,
@@ -428,6 +868,14 @@ def config_files():
         "group": "shared",
         "kind": "yaml",
     }]
+    if os.path.exists(RITUALS_YAML):
+        files.append({
+            "id": "rituals.yaml",
+            "path": RITUALS_YAML,
+            "label": "rituals.yaml",
+            "group": "shared",
+            "kind": "yaml",
+        })
     for name in list_profiles():
         for fname, kind in (("profile.yaml", "yaml"),
                             ("prompt.md", "markdown"),
@@ -452,6 +900,17 @@ def config_lookup(file_id):
 
 
 PLUGIN_COMMENT = re.compile(r"^#\s{2,}([a-z_]+)\s{2,}(.+?)\s*$")
+
+
+# The four tools that are never announced by the cat, so nothing upstream
+# describes them. Short lines, because the abilities list is scanned not read.
+SERVER_TOOL_DOCS = {
+    "handle_exit_intent": "Lets the model end the conversation itself, in any "
+                          "language, without matching a phrase.",
+    "get_lunar": "Answers lunar calendar questions.",
+    "claude_status": "What Claude Code is doing right now.",
+    "claude_sessions": "Which Claude Code sessions are open.",
+}
 
 
 def bundled_plugins():
@@ -495,6 +954,69 @@ LANGUAGES = {
     "vi": "Vietnamese", "zh": "Chinese", "zu": "Zulu",
 }
 
+# Some locales are not accents of one language, they are different languages
+# that are written differently. zh-HK is the one that matters here: a Cantonese
+# voice reading Mandarin-written Chinese mispronounces the grammar, not just the
+# accent. The value on the left is what goes into the profile's `language` line,
+# which the server drops verbatim into "You MUST write EVERY response in X", so
+# it has to be a name a model will actually write differently for.
+LOCALE_LANGUAGES = {
+    "zh-CN": ("Mandarin Chinese", "simplified characters"),
+    "zh-TW": ("Traditional Chinese", "Taiwan, traditional characters"),
+    "zh-HK": ("Cantonese", "Hong Kong, traditional characters"),
+    "yue-CN": ("Cantonese", "simplified characters"),
+    "pt-BR": ("Brazilian Portuguese", ""),
+    "pt-PT": ("European Portuguese", ""),
+    "es-ES": ("European Spanish", ""),
+    "fr-CA": ("Canadian French", ""),
+}
+
+# Accent-only splits inside one written language. These keep the language name
+# and only carry a note, because the model should write the same words either
+# way and only the voice changes.
+REGION_NOTES = {
+    "zh-CN-liaoning": "northeastern accent",
+    "zh-CN-shaanxi": "Shaanxi accent",
+}
+
+
+def language_family(name):
+    """Every language name that is a fair description of what this voice speaks.
+
+    A zh-CN voice is honestly called Chinese or Mandarin Chinese, so a profile
+    that says either is fine and there is nothing to warn about. A profile that
+    says Chinese next to an English voice is a real mistake, and that is the
+    only case worth interrupting for.
+    """
+    parts = name.split("-")
+    code = parts[0]
+    out = {LANGUAGES.get(code, code), voice_language(name)[0]}
+    for locale, (lang, _note) in LOCALE_LANGUAGES.items():
+        if locale.split("-")[0] == code:
+            out.add(lang)
+    return {x for x in out if x}
+
+
+def voice_language(name):
+    """(what goes in the profile's language line, a short note for the list).
+
+    Falls back to the plain language name for every locale that is only an
+    accent, which is nearly all of them.
+    """
+    parts = name.split("-")
+    locale = "-".join(parts[:2])
+    region = "-".join(parts[:3]) if len(parts) > 3 else ""
+    if region in REGION_NOTES:
+        lang, note = LOCALE_LANGUAGES.get(locale, (LANGUAGES.get(parts[0], parts[0]), ""))
+        return lang, REGION_NOTES[region]
+    if locale in LOCALE_LANGUAGES:
+        return LOCALE_LANGUAGES[locale]
+    return LANGUAGES.get(parts[0], parts[0]), ""
+
+# Bumped whenever a voice record grows or changes a field, so a cache written
+# by an older dashboard is thrown out instead of quietly used.
+VOICE_SCHEMA = 2
+
 _voice_cache = {"at": 0, "voices": [], "error": ""}
 _voice_lock = threading.Lock()
 
@@ -531,6 +1053,7 @@ def parse_voice_table(text):
         parts = name.split("-")
         code = parts[0]
         locale = "-".join(parts[:2])
+        language, note = voice_language(name)
         voices.append({
             "name": name,
             "gender": gender,
@@ -538,7 +1061,10 @@ def parse_voice_table(text):
             "personalities": personalities,
             "code": code,
             "locale": locale,
-            "language": LANGUAGES.get(code, code),
+            "language": language,
+            "family": LANGUAGES.get(code, code),
+            "note": note,
+            "v": VOICE_SCHEMA,
             "short": parts[-1].replace("Neural", "") if len(parts) > 2 else name,
         })
     return voices
@@ -551,7 +1077,13 @@ def load_voices(refresh=False):
         disk = os.path.join(CACHE, "voices.json")
         if not refresh and os.path.exists(disk):
             try:
-                _voice_cache["voices"] = json.load(open(disk, encoding="utf-8"))
+                cached = json.load(open(disk, encoding="utf-8"))
+                # A cache written by an older build would put every Chinese
+                # voice back under one label, so it is thrown away rather than
+                # trusted. Re-reading costs one docker exec.
+                if cached and cached[0].get("v") != VOICE_SCHEMA:
+                    cached = []
+                _voice_cache["voices"] = cached
                 _voice_cache["at"] = os.path.getmtime(disk)
                 if _voice_cache["voices"]:
                     return _voice_cache
@@ -771,6 +1303,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.serve_voices("1" in q.get("refresh", []))
             if path == "/api/tts":
                 return self.serve_tts(q)
+            if path == "/api/settings":
+                return self.serve_settings()
+            if path == "/api/progress":
+                return self.send_json(progress_payload())
+            if path == "/favicon.ico":
+                # Browsers ask for this unprompted. Answering keeps a 404 out
+                # of the console of a page whose whole job is showing faults.
+                return self.send_bytes(b"", "image/x-icon", 204)
         except (BrokenPipeError, ConnectionResetError):
             return
         self.send_json({"error": "no such route"}, 404)
@@ -784,6 +1324,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.rebuild()
             if path == "/api/voice":
                 return self.apply_voice()
+            if path == "/api/settings":
+                return self.save_setting()
+            if path == "/api/talk":
+                return self.serve_talk()
         except (BrokenPipeError, ConnectionResetError):
             return
         self.send_json({"error": "no such route"}, 404)
@@ -869,8 +1413,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 fh.write(text)
         except OSError as exc:
             return self.send_json({"error": str(exc)}, 500)
-        self.send_json({"saved": f["id"],
-                        "note": "the server reads data/, so rebuild to make this live"})
+        note = ("the rituals daemon rereads this file within a minute"
+                if f["id"] == "rituals.yaml"
+                else "the server reads data/, so rebuild to make this live")
+        self.send_json({"saved": f["id"], "note": note})
 
     def rebuild(self):
         body = self.read_json()
@@ -880,8 +1426,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         code, out, err = run(
             [sys.executable, os.path.join(ROOT, "tools", "build_profile.py"),
              "use", name], timeout=180)
-        self.send_json({"ok": code == 0, "profile": name,
-                        "output": (out + err).strip()})
+        text = (out + err).strip()
+        # The builder now exits non-zero on a failed restart, but a stale copy
+        # of it would not, so the output is checked as well. A rebuild that
+        # says "done" while the container is on the old build is the one lie
+        # this dashboard must never tell.
+        ok = code == 0 and "restart failed" not in text.lower()
+        self.send_json({"ok": ok, "profile": name, "output": text})
 
     # -- abilities
 
@@ -921,9 +1472,53 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "profile": profile,
             "functions": LOGS.state["functions"],
             "functions_at": LOGS.state["functions_at"],
+            "docs": dict(SERVER_TOOL_DOCS, **LOGS.state["tool_docs"]),
+            "user_tools": LOGS.state["user_tools"],
+            "firmware": LOGS.state["firmware"],
             "servers": servers,
             "plugins": bundled_plugins(),
         })
+
+    # -- settings
+
+    def serve_settings(self):
+        profile = active_profile()
+        profiles = [{"name": n, "description": load_yaml(
+            os.path.join(PROFILES, n, "profile.yaml")).get("description", "")}
+            for n in list_profiles()]
+        payload = settings_api.view(profile, profiles, LOGS.state)
+        payload["rituals"] = rituals_payload()
+        self.send_json(payload)
+
+    def save_setting(self):
+        body = self.read_json()
+        field = body.get("field", "")
+        profile = body.get("profile") or active_profile()
+        # Ritual fields write config/rituals.yaml, which belongs to no profile.
+        if not field.startswith("ritual_") and profile not in list_profiles():
+            return self.send_json({"error": "no profile is built yet"}, 400)
+        try:
+            written, err = settings_api.apply(profile, field, body.get("value"))
+        except Exception as exc:  # a bad edit must not take the dashboard down
+            return self.send_json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+        if err:
+            return self.send_json({"error": err}, 400)
+        self.send_json({"ok": True, "field": field, "file": written})
+
+    # -- the test box
+
+    def serve_talk(self):
+        body = self.read_json()
+        text = (body.get("text") or "").strip()
+        if not text:
+            return self.send_json({"error": "type something to say first"}, 400)
+        if len(text) > 500:
+            return self.send_json({"error": "keep it under 500 characters"}, 400)
+        try:
+            result = talk_once(text, float(body.get("wait") or 30))
+        except Exception as exc:
+            return self.send_json({"error": f"{type(exc).__name__}: {exc}"}, 502)
+        self.send_json(result)
 
     # -- voices
 
@@ -963,16 +1558,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not voice_exists(voice):
             return self.send_json({"error": f"no voice called {voice!r}"}, 400)
         code = voice.split("-")[0]
-        language = LANGUAGES.get(code)
-        if not language:
+        if code not in LANGUAGES and "-".join(voice.split("-")[:2]) not in LOCALE_LANGUAGES:
             return self.send_json(
                 {"error": f"the dashboard does not know what language {code!r} is, "
                           "so it will not guess at the language line"}, 400)
+        language, note = voice_language(voice)
         path, err = set_voice(profile, voice, language)
         if err:
             return self.send_json({"error": err}, 400)
         self.send_json({
             "ok": True, "profile": profile, "voice": voice, "language": language,
+            "note": note,
             "file": os.path.relpath(path, ROOT).replace("\\", "/"),
         })
 
@@ -997,7 +1593,14 @@ def open_browser(url):
 
 
 def port_free(host, port):
+    """Whether the dashboard can bind here.
+
+    SO_REUSEADDR is set for the same reason the server sets it: a socket left
+    in TIME_WAIT by the previous run would otherwise refuse the next one for a
+    minute or two, and restarting right after ctrl-c is the normal thing to do.
+    """
     s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         s.bind((host, port))
         return True
@@ -1008,13 +1611,19 @@ def port_free(host, port):
 
 
 def main():
-    url = f"http://{HOST}:{PORT}/"
-    if not port_free(HOST, PORT):
-        sys.exit(f"something is already listening on {HOST}:{PORT}")
+    port = PORT
+    if "--port" in sys.argv:
+        try:
+            port = int(sys.argv[sys.argv.index("--port") + 1])
+        except (IndexError, ValueError):
+            sys.exit("--port needs a number")
+    url = f"http://{HOST}:{port}/"
+    if not port_free(HOST, port):
+        sys.exit(f"something is already listening on {HOST}:{port}")
     os.makedirs(CACHE, exist_ok=True)
     LOGS.start()
     STATUS.start()
-    httpd = Server((HOST, PORT), Handler)
+    httpd = Server((HOST, port), Handler)
     print(f"cat dashboard on {url}")
     print("ctrl-c to stop")
     if "--no-open" not in sys.argv:

@@ -6,354 +6,1121 @@
 <title>cat-server</title>
 <style>
 :root {
-  --bg:#0b0e11; --panel:#101418; --panel2:#141a20;
-  --line:#1f272e; --line2:#2a343d;
-  --fg:#c7d2da; --fg2:#8c9aa5; --dim:#5d6b76;
-  --accent:#4ec9b0; --warn:#d8a23f; --err:#ef5f5f;
+  /* One interactive color. Ink on white, parchment behind, hairlines between. */
+  --blue:#0066cc; --blue-focus:#0071e3; --blue-tint:rgba(0,102,204,.08);
+  --ink:#1d1d1f; --ink2:#333333; --dim:#6e6e73; --faint:#86868b;
+  --canvas:#ffffff; --parchment:#f5f5f7; --pearl:#fafafc;
+  --hairline:#e0e0e0; --soft:#f0f0f0;
+
+  /* Status is state, not decoration. Green means fine, amber means look,
+     red means act. Everything you can click stays blue. */
+  --ok:#248a3d;   --ok-bg:#f0faf2;   --ok-dark:#30d158;
+  --warn:#9a6200; --warn-bg:#fff6e5; --warn-line:#eed9a9; --warn-dot:#e08700;
+  --err:#d70015;  --err-bg:#fff2f2;  --err-line:#f3c2c4;
+
+  /* Older names the scripts still use. */
+  --fg:#1d1d1f; --fg2:#333333; --amber:#9a6200; --rose:#d70015;
+  --line:#f0f0f0; --line2:#e0e0e0; --line3:#c9c9ce; --bg:#f5f5f7;
+
   --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
-  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --sans: -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  --r:8px; --r-lg:18px; --pill:9999px;
 }
 * { box-sizing:border-box; }
 html, body { height:100%; }
 body {
-  margin:0; background:var(--bg); color:var(--fg);
-  font-family:var(--sans); font-size:13px; line-height:1.5;
+  margin:0; background:var(--parchment); color:var(--ink);
+  font-family:var(--sans); font-size:14px; line-height:1.45;
+  letter-spacing:-.1px;
   display:flex; flex-direction:column; overflow:hidden;
 }
 button, input, select, textarea { font-family:inherit; font-size:inherit; color:inherit; }
+:focus-visible { outline:2px solid var(--blue-focus); outline-offset:2px; }
 button {
-  background:var(--panel2); border:1px solid var(--line2); color:var(--fg2);
-  padding:4px 10px; border-radius:3px; cursor:pointer;
+  background:var(--canvas); border:1px solid var(--hairline); color:var(--ink);
+  padding:6px 14px; border-radius:var(--pill); cursor:pointer;
+  transition:border-color .12s ease, color .12s ease, background .12s ease,
+    transform .12s ease;
 }
-button:hover { border-color:var(--dim); color:var(--fg); }
-button:disabled { opacity:.4; cursor:default; }
-button.primary { border-color:var(--accent); color:var(--accent); }
-button.primary:hover { background:rgba(78,201,176,.08); }
-input[type=text], input[type=search], select, textarea {
-  background:#0c1013; border:1px solid var(--line2); border-radius:3px;
-  padding:4px 8px; outline:none;
+button:hover:not(:disabled) { border-color:var(--line3); background:var(--pearl); }
+button:active:not(:disabled) { transform:scale(.96); }
+button:disabled { opacity:.4; cursor:not-allowed; }
+button.go { background:var(--blue); border-color:var(--blue); color:#fff; }
+button.go:hover:not(:disabled) { background:var(--blue-focus); border-color:var(--blue-focus); }
+button.loud { background:var(--blue); border-color:var(--blue); color:#fff;
+  font-weight:600; padding:8px 18px; }
+button.loud:hover:not(:disabled) { background:var(--blue-focus); border-color:var(--blue-focus); }
+button.danger { border-color:var(--err-line); color:var(--err); background:var(--canvas); }
+input[type=text], input[type=search], input[type=number], select, textarea {
+  background:var(--canvas); border:1px solid var(--hairline); border-radius:var(--r);
+  padding:7px 12px; outline:none; color:var(--ink);
 }
-input:focus, select:focus, textarea:focus { border-color:var(--dim); }
-::-webkit-scrollbar { width:10px; height:10px; }
-::-webkit-scrollbar-thumb { background:#232c34; border-radius:5px; }
+input[type=search] { border-radius:var(--pill); padding:7px 14px; }
+input:hover, select:hover, textarea:hover { border-color:var(--line3); }
+input:focus, select:focus, textarea:focus { border-color:var(--blue-focus); }
+::-webkit-scrollbar { width:11px; height:11px; }
+::-webkit-scrollbar-thumb { background:#d2d2d7; border-radius:6px; }
+::-webkit-scrollbar-thumb:hover { background:#b9b9c0; }
 ::-webkit-scrollbar-track { background:transparent; }
+@media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
 
-/* ---------------------------------------------------------------- header */
-header {
-  border-bottom:1px solid var(--line); background:var(--panel);
-  display:flex; align-items:stretch; flex:0 0 auto;
-}
-header .brand {
-  padding:10px 16px; display:flex; flex-direction:column; justify-content:center;
-  border-right:1px solid var(--line); min-width:150px;
-}
-header .brand b { font-size:13px; letter-spacing:.4px; }
-header .brand span { color:var(--dim); font-size:11px; }
-.cells { display:flex; flex:1; min-width:0; overflow-x:auto; }
-.cell {
-  padding:9px 16px; border-right:1px solid var(--line);
-  min-width:0; max-width:230px; display:flex; flex-direction:column; gap:2px;
-  white-space:nowrap; overflow:hidden;
-}
-.cell .k { color:var(--dim); font-size:10px; text-transform:uppercase;
-  letter-spacing:.7px; overflow:hidden; text-overflow:ellipsis; }
-.cell .v { font-family:var(--mono); font-size:12px; color:var(--fg);
-  overflow:hidden; text-overflow:ellipsis; }
-.cell .v.sub { color:var(--fg2); font-size:11px; font-family:var(--sans); }
-.dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px;
-       background:var(--dim); vertical-align:1px; }
-.dot.on { background:var(--accent); }
-.dot.warn { background:var(--warn); }
-.dot.off { background:#3b464f; }
-.dot.bad { background:var(--err); }
+.mono { font-family:var(--mono); }
 
-/* ------------------------------------------------------------------ body */
-main {
-  flex:1; min-height:0; display:grid;
-  grid-template-columns: minmax(0,1fr) 500px;
-  grid-template-rows: minmax(0,1fr);
+/* ================================================== global bar and verdict */
+/* The one place pure black appears. The most consequential sentence on the
+   page lives here, with a colored dot as its second channel, and the rebuild
+   button rides along so it is visible whichever tab is open. */
+.verdict {
+  flex:0 0 auto; display:flex; align-items:center; gap:14px;
+  padding:0 16px; height:48px; background:#000; color:#fff;
+  cursor:pointer; user-select:none;
 }
-@media (min-width:1700px) { main { grid-template-columns: minmax(0,1fr) 600px; } }
-section.logs {
-  min-width:0; min-height:0; display:flex; flex-direction:column;
-  border-right:1px solid var(--line);
-}
-aside { min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--panel); }
+.verdict:hover { background:#101013; }
+.verdict .brand { font-weight:600; color:#fff; font-size:14px; flex:0 0 auto; }
+.verdict .say { font-size:15px; color:#fff; font-weight:600; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  display:flex; align-items:center; gap:9px; }
+.verdict .say::before { content:""; width:8px; height:8px; border-radius:50%;
+  background:var(--ok-dark); flex:0 0 auto; }
+.verdict .also { color:#a1a1a6; font-size:12.5px; flex:0 0 auto; }
+.verdict .spacer { flex:1; }
+.verdict .stamp { color:#6e6e73; font-family:var(--mono); font-size:11px; flex:0 0 auto; }
+.verdict .chev { color:#a1a1a6; flex:0 0 auto; font-size:11px; width:12px; text-align:center; }
+.verdict .go { flex:0 0 auto; padding:5px 14px; font-size:12.5px; }
+.verdict.bad .say { color:#ff6961; }
+.verdict.bad .say::before { background:#ff453a; }
+.verdict.watch .say { color:#ffd60a; }
+.verdict.watch .say::before { background:#ffd60a; }
 
+.now { display:flex; align-items:center; gap:16px; flex:0 0 auto;
+  font-size:12px; color:#a1a1a6; }
+.now b { color:#fff; font-weight:600; font-family:var(--mono); font-size:12px; }
+
+/* ========================================================= pending banner */
+.pending {
+  flex:0 0 auto; display:none; align-items:center; gap:14px;
+  padding:10px 16px; background:var(--warn-bg);
+  border-bottom:1px solid var(--warn-line);
+}
+.pending.show { display:flex; }
+.pending .txt { color:var(--warn); font-weight:600; font-size:14px; flex:1; min-width:0; }
+.pending .txt small { display:block; font-weight:400; color:var(--ink2); font-size:12.5px; }
+.pending.building { background:var(--blue-tint); border-color:var(--hairline); }
+.pending.building .txt { color:var(--blue); }
+.steps { display:flex; gap:6px; align-items:center; flex:0 0 auto; }
+.steps .st { font-size:11px; color:var(--dim); padding:4px 12px;
+  border:1px solid var(--hairline); background:var(--canvas);
+  font-family:var(--mono); border-radius:var(--pill); }
+.steps .st.on { color:#fff; border-color:var(--blue); background:var(--blue); font-weight:600; }
+.steps .st.done { color:var(--ok); border-color:var(--ok-bg); background:var(--ok-bg); }
+
+/* ==================================================== status detail strip */
+/* The facts as one paragraph rather than a grid. Worst first, a severity dot
+   on each clause, values in the mono face, and a clause whose subject lives
+   somewhere on this page is a link to that place. */
+.detail { display:none; flex:0 0 auto; background:var(--canvas);
+  border-bottom:1px solid var(--hairline); max-height:34vh; overflow:auto; }
+.detail.show { display:block; }
+.statusprose { margin:0; padding:14px 20px 16px; max-width:110ch;
+  font-size:13.5px; line-height:2.05; color:var(--ink2); }
+.statusprose .cl { margin-right:5px; }
+.statusprose .cl .v { font-family:var(--mono); font-size:12.5px; color:var(--ink); }
+.statusprose .cl.watch, .statusprose .cl.watch .v { color:var(--warn); }
+.statusprose .cl.bad { font-weight:600; }
+.statusprose .cl.bad, .statusprose .cl.bad .v { color:var(--err); }
+.statusprose a.cl { color:inherit; text-decoration:underline;
+  text-decoration-color:var(--line3); text-underline-offset:3px; cursor:pointer; }
+.statusprose a.cl:hover { text-decoration-color:currentColor; }
+.statusprose .cl .dot { margin-right:7px; }
+
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:8px;
+       background:var(--faint); vertical-align:1px; flex:0 0 auto; }
+.dot.on { background:var(--ok); box-shadow:0 0 0 3px var(--ok-bg); }
+.dot.warn { background:var(--warn-dot); }
+.dot.off { background:#d2d2d7; box-shadow:inset 0 0 0 1px #b9b9c0; }
+.dot.bad { background:var(--err); box-shadow:0 0 0 3px var(--err-bg); }
+
+/* ============================================================ frosted nav */
+nav {
+  flex:0 0 auto; display:flex; align-items:stretch;
+  background:rgba(245,245,247,.85);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);
+  backdrop-filter:saturate(180%) blur(20px);
+  border-bottom:1px solid var(--hairline);
+}
+nav .tab {
+  flex:1 1 0; min-width:0; justify-content:center;
+  border:0; border-radius:0; background:transparent; color:var(--dim);
+  padding:0 12px; height:52px; display:flex; align-items:center; gap:8px;
+  border-bottom:2px solid transparent; font-size:14px; font-weight:400;
+}
+nav .tab:hover { color:var(--ink); background:transparent; }
+nav .tab:active:not(:disabled) { transform:none; }
+nav .tab[aria-selected="true"] {
+  color:var(--ink); font-weight:600; border-bottom-color:var(--blue);
+}
+nav .badge {
+  font-family:var(--mono); font-size:10.5px; font-weight:700; line-height:1;
+  padding:3px 7px; border-radius:var(--pill); display:none;
+}
+nav .badge.show { display:inline-block; }
+nav .badge.err { background:var(--err); color:#fff; }
+nav .badge.warn { background:var(--warn-dot); color:#fff; }
+nav .badge.edit { background:var(--blue); color:#fff; }
+
+main { flex:1; min-height:0; display:flex; }
+.pane { flex:1; min-width:0; min-height:0; display:none; flex-direction:column; }
+.pane.on { display:flex; }
+
+.empty {
+  margin:auto; max-width:48ch; text-align:center; color:var(--dim);
+  font-size:14px; line-height:1.6; padding:40px 20px;
+}
+.empty b { display:block; color:var(--ink); margin-bottom:8px; font-size:17px;
+  font-weight:600; }
+
+/* ================================================================== cat */
+.catwrap { flex:1; min-height:0; display:flex; }
+.secnav {
+  flex:0 0 210px; min-height:0; overflow:auto; background:var(--parchment);
+  border-right:1px solid var(--hairline); padding:14px 10px;
+}
+.secnav a {
+  display:flex; align-items:center; gap:10px; padding:8px 12px; margin:1px 0;
+  color:var(--ink2); text-decoration:none; font-size:13.5px;
+  border-radius:var(--r); cursor:pointer;
+}
+.secnav a:hover { background:#ebebf0; color:var(--ink); }
+.secnav a.on { color:var(--blue); background:var(--blue-tint); font-weight:600; }
+.secnav .lead { padding:6px 12px 8px; color:var(--faint); font-size:12px;
+  font-weight:600; }
+
+.catbody { flex:1; min-width:0; min-height:0; overflow:auto;
+  padding:20px 24px 60px; }
+/* Each section is a white utility card on the parchment canvas. */
+.sec { background:var(--canvas); border:1px solid var(--hairline);
+  border-radius:var(--r-lg); padding:24px 28px 26px; margin:0 0 18px;
+  max-width:1100px; }
+.sec > h2 {
+  margin:0 0 4px; font-size:21px; font-weight:600; color:var(--ink);
+  letter-spacing:-.3px; display:flex; align-items:center; gap:10px;
+}
+.sec > h2 .bar { display:none; }
+.sec > h2 .count {
+  font-family:var(--mono); font-size:11.5px; font-weight:600; padding:3px 10px;
+  border-radius:var(--pill); background:var(--parchment); color:var(--dim);
+}
+.sec > .lede { margin:0 0 18px; color:var(--dim); font-size:14px; max-width:72ch; }
+.sec > .rule { display:none; }
+
+/* subsection heading */
+h3.sub {
+  margin:24px 0 8px; font-size:15px; font-weight:600; color:var(--ink);
+  letter-spacing:-.2px; display:flex; align-items:center; gap:10px;
+  padding-bottom:8px; border-bottom:1px solid var(--soft);
+}
+h3.sub .tail { margin-left:auto; font-weight:400; font-size:12px;
+  color:var(--dim); letter-spacing:0; }
+
+/* a labelled setting */
+.field { margin:0 0 20px; max-width:860px; }
+.field .lab { display:flex; align-items:baseline; gap:10px; margin-bottom:3px; }
+.field .lab label { font-size:15px; font-weight:600; color:var(--ink); }
+.field .src {
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; color:var(--dim);
+  border:1px solid var(--hairline); border-radius:var(--pill); padding:2px 9px;
+  cursor:pointer; white-space:nowrap; background:var(--canvas);
+}
+.field .src:hover { color:var(--blue); border-color:var(--blue); }
+.field .src.inherit { color:var(--warn); border-color:var(--warn-line);
+  background:var(--warn-bg); }
+.field .help { color:var(--dim); font-size:12.5px; margin:0 0 9px; max-width:70ch; }
+.field .row { display:flex; gap:10px; align-items:flex-start; }
+.field input[type=text], .field input[type=number], .field select { flex:1; min-width:0; }
+.field input[type=number] { flex:0 0 130px; }
+.field textarea {
+  flex:1; min-width:0; font-family:var(--mono); font-size:12.5px; line-height:1.65;
+  resize:vertical; min-height:90px;
+}
+.field .save { flex:0 0 auto; visibility:hidden; }
+.field.dirty .save { visibility:visible; }
+.field.dirty input, .field.dirty textarea, .field.dirty select { border-color:var(--warn-dot); }
+.fmsg { font-size:12px; margin-top:6px; display:none; font-family:var(--mono); }
+.fmsg.show { display:block; }
+.fmsg.ok { color:var(--ok); }
+.fmsg.bad { color:var(--err); font-weight:600; }
+
+.warnbox {
+  display:flex; gap:11px; align-items:flex-start; padding:12px 14px; margin:0 0 18px;
+  border:1px solid var(--warn-line); background:var(--warn-bg);
+  border-radius:var(--r); max-width:860px;
+}
+.warnbox b { color:var(--warn); display:block; font-size:13.5px; }
+.warnbox span { color:var(--ink2); font-size:12.5px; }
+.warnbox button { flex:0 0 auto; margin-left:auto; }
+
+/* Toggle rows are a divider list with a real switch. The switch alone carries
+   the state, so the row itself stays quiet. */
+.tog {
+  display:flex; align-items:center; gap:14px; padding:12px 4px;
+  border-bottom:1px solid var(--soft); max-width:1000px;
+}
+.tog .sw {
+  flex:0 0 auto; width:42px; height:25px; border-radius:var(--pill);
+  background:#d2d2d7; border:0; position:relative; cursor:pointer; padding:0;
+  transition:background .15s ease;
+}
+.tog .sw::after {
+  content:""; position:absolute; top:2px; left:2px; width:21px; height:21px;
+  border-radius:50%; background:#fff; box-shadow:inset 0 0 0 1px rgba(0,0,0,.06);
+  transition:transform .15s ease;
+}
+.tog.on .sw { background:var(--blue); }
+.tog.on .sw::after { transform:translateX(17px); }
+.tog .body { flex:1; min-width:0; }
+.tog .n { font-size:14px; color:var(--ink); font-weight:600; }
+.tog .why { color:var(--dim); font-size:12.5px; margin-top:2px; }
+.tog .tag {
+  flex:0 0 auto; font-size:11px; border:1px solid var(--hairline);
+  border-radius:6px; padding:2px 8px; color:var(--dim);
+}
+.tog .state { flex:0 0 auto; font-size:11.5px; font-family:var(--mono); color:var(--dim); }
+.tog .state.up { color:var(--ok); }
+.tog .state.down { color:var(--err); font-weight:600; }
+
+/* ritual rows: a toggle row with an editable fire time */
+.tog .rtime { flex:0 0 78px; text-align:center; font-family:var(--mono);
+  padding:5px 8px; }
+.tog .rsave { flex:0 0 auto; visibility:hidden; }
+.tog.rdirty .rsave { visibility:visible; }
+.tog.rdirty .rtime { border-color:var(--warn-dot); }
+
+/* read-only tool rows, the cat's own body */
+.tool {
+  display:flex; gap:14px; align-items:baseline; padding:9px 4px;
+  border-bottom:1px solid var(--soft); max-width:1000px;
+}
+.tool .n { font-family:var(--mono); font-size:12.5px; color:var(--ink);
+  flex:0 0 250px; word-break:break-all; font-weight:600; }
+.tool .d { color:var(--ink2); font-size:12.5px; flex:1; min-width:0; }
+.tool .tag {
+  flex:0 0 auto; font-size:11px;
+  border:1px solid var(--hairline); border-radius:6px; padding:1px 8px; color:var(--dim);
+}
+.tool.mcp .n, .tool.builtin .n { color:var(--ink); }
+
+/* the wall: what cannot be changed here */
+.wall {
+  display:grid; grid-template-columns:210px 1fr; gap:0 18px; padding:13px 16px;
+  border:1px solid var(--hairline); border-left:3px solid var(--err);
+  border-radius:var(--r); margin-bottom:9px; background:var(--pearl); max-width:1000px;
+}
+.wall .w { color:var(--ink); font-weight:600; font-size:13.5px; }
+.wall .where { color:var(--err); font-size:11.5px; font-family:var(--mono); margin-top:2px; }
+.wall .why { color:var(--ink2); font-size:12.5px; }
+.wall .val { grid-column:2; font-family:var(--mono); font-size:12.5px; color:var(--dim);
+  margin-top:6px; }
+
+.chips { display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
+.chips .c {
+  font-family:var(--mono); font-size:12px; color:var(--ink); background:var(--parchment);
+  border:1px solid var(--hairline); border-radius:var(--pill); padding:4px 12px;
+  display:flex; align-items:center; gap:7px;
+}
+.chips .c button { border:0; background:transparent; color:var(--faint); padding:0 0 0 2px;
+  font-size:13px; line-height:1; }
+.chips .c button:hover { color:var(--err); background:transparent; }
+.chips input { width:170px; }
+
+/* ================================================================== logs */
 .toolbar {
-  display:flex; align-items:center; gap:8px; padding:7px 12px;
-  border-bottom:1px solid var(--line); background:var(--panel); flex:0 0 auto;
+  display:flex; align-items:center; gap:10px; padding:9px 16px;
+  border-bottom:1px solid var(--soft); background:var(--canvas); flex:0 0 auto;
   flex-wrap:wrap;
 }
-.toolbar .title { font-weight:600; letter-spacing:.3px; margin-right:4px; }
 .toolbar .spacer { flex:1; }
 .chip {
-  border:1px solid var(--line2); border-radius:3px; padding:2px 8px;
-  color:var(--dim); cursor:pointer; user-select:none; font-size:11px;
-  font-family:var(--mono);
+  border:1px solid var(--hairline); border-radius:var(--pill); padding:4px 12px;
+  color:var(--dim); cursor:pointer; user-select:none; font-size:12px;
+  background:transparent;
 }
-.chip.on { color:var(--fg); border-color:var(--dim); background:var(--panel2); }
-.chip.on[data-level=WARNING] { color:var(--warn); border-color:#4a3a1c; }
-.chip.on[data-level=ERROR] { color:var(--err); border-color:#4a2222; }
-label.check { color:var(--fg2); display:flex; align-items:center; gap:5px; cursor:pointer; font-size:12px; }
+.chip:hover { color:var(--ink); }
+.chip.on { color:var(--ink); border-color:var(--line3); background:var(--parchment); }
+.chip.on[data-level=WARNING] { color:var(--warn); border-color:var(--warn-line); background:var(--warn-bg); }
+.chip.on[data-level=ERROR] { color:var(--err); border-color:var(--err-line); background:var(--err-bg); }
+label.check { color:var(--dim); display:flex; align-items:center; gap:7px;
+  cursor:pointer; font-size:12.5px; }
+label.check:hover { color:var(--ink); }
 
-#log {
-  flex:1; min-height:0; overflow:auto; padding:6px 0 14px;
-  font-family:var(--mono); font-size:12px; line-height:1.45;
-}
-.row { display:flex; padding:1px 12px; white-space:pre-wrap; word-break:break-word; }
-.row:hover { background:#0f1418; }
-.row .ts { color:#3f4a53; flex:0 0 58px; margin-right:10px; }
-.row .mod { color:#4f6069; flex:0 0 150px; margin-right:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.row .msg { flex:1; min-width:0; color:var(--fg2); }
-.row.info .msg { color:#9fb0bb; }
-.row.warn .msg { color:var(--warn); }
-.row.error .msg { color:var(--err); }
-.row .msg mark { background:rgba(78,201,176,.22); color:#dff5ef; border-radius:2px; }
-#jump {
-  position:absolute; right:22px; bottom:16px; z-index:5; display:none;
-}
-.logwrap { position:relative; flex:1; min-height:0; display:flex; flex-direction:column; }
+.logwrap { position:relative; flex:1; min-height:0; display:flex; flex-direction:column;
+  background:var(--canvas); }
+#log { flex:1; min-height:0; overflow:auto; padding:6px 0 14px;
+  font-family:var(--mono); font-size:12px; line-height:1.55; }
+.lrow { display:flex; padding:1px 14px 1px 12px; white-space:pre-wrap;
+       word-break:break-word; border-left:3px solid transparent; }
+.lrow:hover { background:var(--pearl); }
+.lrow .ts { color:var(--faint); flex:0 0 64px; margin-right:12px; }
+.lrow .mod { color:var(--faint); flex:0 0 172px; margin-right:12px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lrow .msg { flex:1; min-width:0; color:var(--ink2); }
+.lrow.warn { border-left-color:var(--warn-dot); background:var(--warn-bg); }
+.lrow.warn .msg { color:var(--warn); }
+.lrow.warn .ts, .lrow.warn .mod { color:#a9863a; }
+.lrow.error { border-left-color:var(--err); background:var(--err-bg); }
+.lrow.error .msg { color:var(--err); font-weight:600; }
+.lrow.error .ts, .lrow.error .mod { color:#d98a92; }
+.lrow .msg mark { background:rgba(0,102,204,.15); color:var(--ink); border-radius:2px; }
+
+#jump { position:absolute; right:24px; bottom:18px; z-index:5; display:none; }
 .logfoot {
-  flex:0 0 auto; border-top:1px solid var(--line); padding:4px 12px;
-  color:var(--dim); font-size:11px; font-family:var(--mono);
-  display:flex; gap:16px;
+  flex:0 0 auto; border-top:1px solid var(--soft); padding:6px 16px;
+  color:var(--dim); font-size:11.5px; font-family:var(--mono);
+  display:flex; gap:18px; align-items:center; background:var(--canvas);
 }
+.logfoot .grow { flex:1; }
+#errcount { padding:2px 10px; font-size:11.5px; font-family:var(--mono);
+  color:var(--err); border-color:var(--err-line); background:var(--err-bg); font-weight:700; }
+.logfoot button { padding:2px 10px; font-size:11.5px; }
+.kbd { font-family:var(--mono); font-size:11px; color:var(--faint); }
+.kbd b { color:var(--dim); font-weight:600; border:1px solid var(--hairline);
+  border-radius:4px; padding:0 5px; }
 
-/* ------------------------------------------------------------------ tabs */
-.tabs { display:flex; border-bottom:1px solid var(--line); flex:0 0 auto; }
-.tabs button {
-  flex:1; border:0; border-right:1px solid var(--line); border-bottom:2px solid transparent;
-  background:transparent; padding:9px 0; border-radius:0; color:var(--dim);
+/* ================================================================ files */
+.split { flex:1; min-height:0; display:flex; }
+.rail {
+  flex:0 0 250px; min-height:0; overflow:auto; background:var(--parchment);
+  border-right:1px solid var(--hairline); padding:10px 10px 20px;
 }
-.tabs button:last-child { border-right:0; }
-.tabs button.on { color:var(--fg); border-bottom-color:var(--accent); background:var(--panel2); }
-.pane { flex:1; min-height:0; overflow:auto; display:none; }
-.pane.on { display:block; }
-.pad { padding:12px 14px; }
-h3 { margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.9px; color:var(--dim); font-weight:600; }
-.note { color:var(--dim); font-size:11.5px; margin:0 0 10px; }
-.group { border-top:1px solid var(--line); padding:12px 14px; }
-.group:first-child { border-top:0; }
-
-/* ---------------------------------------------------------------- config */
-.filelist { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:4px; }
-.filelist .lbl { color:var(--dim); font-size:11px; width:100%; font-family:var(--mono); margin-top:6px; }
-.filelist .lbl:first-child { margin-top:0; }
-.filebtn { font-family:var(--mono); font-size:11.5px; }
-.filebtn.on { border-color:var(--accent); color:var(--accent); }
+.rail .lbl { color:var(--faint); font-family:var(--mono); font-size:11px;
+  padding:14px 12px 6px; font-weight:600; }
+.rail button {
+  display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+  border:0; border-radius:var(--r); background:transparent; color:var(--ink2);
+  padding:7px 12px; font-family:var(--mono); font-size:12.5px; margin:1px 0;
+}
+.rail button:hover { background:#ebebf0; color:var(--ink); }
+.rail button:active:not(:disabled) { transform:none; }
+.rail button.on { background:var(--blue-tint); color:var(--blue); font-weight:700; }
+.rail .mark { margin-left:auto; font-size:9px; color:var(--warn-dot); display:none; }
+.rail button.dirty .mark { display:inline; }
+.rail .note { color:var(--dim); font-size:12px; padding:16px 12px 0; margin:14px 0 0;
+  border-top:1px solid var(--hairline); }
+.editwrap { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column;
+  background:var(--canvas); }
+.editwrap .toolbar .path { font-family:var(--mono); font-size:13px; color:var(--ink); font-weight:600; }
+.editwrap .toolbar .path .dir { color:var(--dim); font-weight:400; }
 pre.code, textarea.code {
-  font-family:var(--mono); font-size:12px; line-height:1.5;
-  background:#0c1013; border:1px solid var(--line2); border-radius:3px;
-  padding:10px 12px; margin:0; overflow:auto; white-space:pre; tab-size:2;
-  min-height:300px; max-height:none; width:100%;
+  flex:1; min-height:0; margin:0; width:100%;
+  font-family:var(--mono); font-size:12.5px; line-height:1.65;
+  background:var(--canvas); border:0; border-radius:0;
+  padding:14px 18px; overflow:auto; white-space:pre; tab-size:2; color:var(--ink2);
 }
-textarea.code { resize:vertical; height:440px; display:block; }
-.tok-com { color:#4a5b64; }
-.tok-key { color:#7fb3d5; }
-.tok-str { color:#b3cf9a; }
-.tok-num { color:#d7a06a; }
-.tok-var { color:var(--accent); }
-.tok-pun { color:#5a6a74; }
-.tok-h { color:#7fb3d5; font-weight:600; }
-.msgline { font-family:var(--mono); font-size:11.5px; margin-top:8px; white-space:pre-wrap; }
-.msgline.ok { color:var(--accent); }
-.msgline.bad { color:var(--err); }
-
-/* ------------------------------------------------------------- abilities */
-.tool { display:flex; gap:8px; align-items:baseline; padding:3px 0; font-family:var(--mono); font-size:12px; }
-.tool .n { color:var(--fg); }
-.tool .tag { color:var(--dim); font-size:10.5px; border:1px solid var(--line2); border-radius:2px; padding:0 5px; }
-.tool.off .n { color:#4d5860; text-decoration:line-through; }
-.srv { border:1px solid var(--line); border-radius:3px; padding:9px 11px; margin-bottom:8px; background:var(--panel2); }
-.srv .head { display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:12.5px; }
-.srv .meta { color:var(--dim); font-family:var(--mono); font-size:11px; margin-top:4px; word-break:break-all; }
-.srv .tools { margin-top:6px; }
-.plug { display:flex; gap:10px; padding:4px 0; align-items:baseline; }
-.plug .n { font-family:var(--mono); font-size:12px; color:#4d5860; text-decoration:line-through; flex:0 0 auto; }
-.plug .why { color:var(--dim); font-size:11.5px; }
-
-/* ---------------------------------------------------------------- voices */
-.vfilters { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
-.vfilters select, .vfilters input { flex:1; min-width:110px; }
-#sample { width:100%; font-family:var(--mono); }
-.vlist { border-top:1px solid var(--line); }
-.v {
-  display:flex; align-items:center; gap:8px; padding:6px 14px;
-  border-bottom:1px solid var(--line);
+textarea.code { resize:none; display:none; outline:none; }
+textarea.code:focus { outline:none; box-shadow:inset 3px 0 0 var(--blue); border:0; }
+.tok-com { color:var(--faint); }
+.tok-key { color:var(--blue); }
+.tok-str { color:#1d7a3a; }
+.tok-num { color:#9a6200; }
+.tok-var { color:var(--blue); font-weight:700; }
+.tok-pun { color:var(--faint); }
+.tok-h { color:var(--blue); font-weight:700; }
+.msgline {
+  flex:0 0 auto; font-family:var(--mono); font-size:12px; padding:8px 18px;
+  white-space:pre-wrap; border-top:1px solid var(--soft); display:none;
 }
-.v:hover { background:var(--panel2); }
-.v.cur { background:rgba(78,201,176,.06); }
-.v .nm { font-family:var(--mono); font-size:12px; flex:1; min-width:0;
-         overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.v .nm small { color:var(--dim); font-family:var(--sans); margin-left:6px; font-size:11px; }
-.v .g { color:var(--dim); font-size:11px; width:52px; flex:0 0 auto; }
-.v button { padding:2px 8px; font-size:11px; }
-.v .play { width:34px; text-align:center; }
-.vhead { padding:10px 14px; border-bottom:1px solid var(--line); }
-.count { color:var(--dim); font-size:11px; font-family:var(--mono); }
+.msgline.show { display:block; }
+.msgline.ok { color:var(--ok); background:var(--ok-bg); }
+.msgline.bad { color:var(--err); background:var(--err-bg); font-weight:600; }
+
+/* ================================================================ voices */
+.vhead { flex:0 0 auto; padding:16px; border-bottom:1px solid var(--hairline);
+  background:var(--canvas); }
+.nowvoice {
+  display:flex; align-items:center; gap:14px; padding:12px 16px;
+  border:1px solid var(--hairline); background:var(--pearl);
+  border-radius:var(--r-lg); margin-bottom:14px;
+}
+.nowvoice .k { color:var(--dim); font-size:12px; flex:0 0 auto; }
+.nowvoice .n { font-family:var(--mono); font-size:15px; color:var(--ink); font-weight:700; }
+.nowvoice .sub { color:var(--dim); font-size:12.5px; }
+.nowvoice.bad { border-color:var(--err-line); background:var(--err-bg); }
+.nowvoice.bad .n { color:var(--err); }
+.vfilters { display:flex; gap:9px; flex-wrap:wrap; align-items:center; }
+.vfilters select { min-width:170px; }
+.vfilters input[type=search] { min-width:150px; }
+.vfilters .grow { flex:1; min-width:240px; }
+.vcount { color:var(--dim); font-size:11.5px; font-family:var(--mono); flex:0 0 auto; }
+.vlist { flex:1; min-height:0; overflow:auto; padding:14px 16px;
+  display:grid; gap:10px; grid-template-columns:repeat(auto-fill, minmax(360px,1fr));
+  align-content:start; }
+/* The chosen voice reads like a selected configurator chip: a 2px blue ring. */
+.voice { display:flex; align-items:center; gap:11px; padding:9px 12px;
+  border:1px solid var(--hairline); border-radius:12px; background:var(--canvas); }
+.voice:hover { background:var(--pearl); }
+.voice.cur { border:2px solid var(--blue-focus); padding:8px 11px; }
+.voice .who { flex:1; min-width:0; }
+.voice .nm { font-family:var(--mono); font-size:12.5px; display:block;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); }
+.voice.cur .nm { color:var(--blue); font-weight:700; }
+.voice .lang { color:var(--dim); font-size:11.5px; display:block; margin-top:1px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.voice button { padding:4px 12px; font-size:11.5px; white-space:nowrap; flex:0 0 auto; }
+.voice .play { width:32px; height:32px; padding:0; text-align:center;
+  border-radius:50%; }
+.vgroup { grid-column:1/-1; margin:10px 0 0; }
+.vgroup:first-child { margin-top:0; }
+
+/* ============================================================== progress */
+.progbody { flex:1; min-width:0; min-height:0; overflow:auto;
+  padding:20px 24px 60px; }
+/* the overview: one clause per section in the status paragraph style, with the
+   30 day completion rate as the loudest number on the tab */
+.progintro { background:var(--canvas); border:1px solid var(--hairline);
+  border-radius:var(--r-lg); padding:20px 28px; margin:0 0 18px;
+  max-width:1100px; }
+.progintro .statusprose { padding:0; }
+.progintro .sq { display:inline-block; width:9px; height:9px; border-radius:2px;
+  margin-right:8px; }
+.bignum { font-size:30px; font-weight:600; color:var(--ink); line-height:1;
+  letter-spacing:-.6px; padding:0 2px; vertical-align:-3px;
+  font-variant-numeric:tabular-nums; }
+/* each section heading carries its own one line summary with its key number */
+.sec > h2 .htail { margin-left:auto; font-weight:400; font-size:12px;
+  color:var(--dim); letter-spacing:0; text-align:right; }
+.sec > h2 .htail .v { font-family:var(--mono); font-size:12px; color:var(--ink); }
+.dayrow { display:grid; grid-template-columns:86px 180px 1fr; gap:3px 16px;
+  padding:10px 4px; border-bottom:1px solid var(--soft); max-width:1100px;
+  align-items:start; }
+.dayrow .d { font-family:var(--mono); font-size:12px; color:var(--dim);
+  padding-top:2px; }
+.dayrow .score { display:flex; align-items:center; gap:9px; padding-top:4px; }
+.dayrow .score .num { font-family:var(--mono); font-size:12px; color:var(--ink);
+  flex:0 0 36px; }
+.cmeter { flex:1; height:6px; border-radius:3px; background:#e8e8ed;
+  overflow:hidden; }
+.cmeter i { display:block; height:100%; background:var(--blue);
+  border-radius:3px; }
+.dayrow .txt { font-size:12.5px; color:var(--ink2); min-width:0; }
+.dayrow .txt .row { margin:1px 0; }
+.dayrow .txt .k { color:var(--dim); font-family:var(--mono); font-size:11px;
+  margin-right:6px; }
+.dayrow .txt .miss { color:var(--warn); }
+.nodata { color:var(--faint); font-family:var(--mono); font-size:11.5px; }
+.chartwrap { position:relative; max-width:860px; }
+.chartwrap svg { display:block; width:100%; height:auto; }
+.ctip { position:absolute; pointer-events:none; background:var(--canvas);
+  border:1px solid var(--hairline); border-radius:var(--r); padding:5px 10px;
+  font-size:12px; display:none; z-index:4; white-space:nowrap; }
+.ctip b { color:var(--ink); font-family:var(--mono); }
+.ctip span { color:var(--dim); }
+.wtable { border-collapse:collapse; font-size:12px; margin-top:12px; }
+.wtable th { color:var(--dim); font-weight:600; font-size:11.5px;
+  padding:3px 22px 3px 0; text-align:left; }
+.wtable td { font-family:var(--mono); color:var(--ink2);
+  padding:3px 22px 3px 0; font-variant-numeric:tabular-nums; }
+.focusrow { display:flex; gap:14px; align-items:baseline; padding:9px 4px;
+  border-bottom:1px solid var(--soft); max-width:1000px; }
+.focusrow .d { font-family:var(--mono); font-size:12px; color:var(--dim);
+  flex:0 0 118px; }
+.focusrow .min { font-family:var(--mono); font-size:11.5px; color:var(--dim);
+  flex:0 0 58px; }
+.focusrow .i { flex:1; min-width:0; color:var(--ink2); font-size:12.5px; }
+.focusrow .st { flex:0 0 auto; font-family:var(--mono); font-size:11.5px;
+  color:var(--dim); }
+.focusrow .st.done { color:var(--ok); }
+.focusrow .st.notdone { color:var(--warn); }
+.focusrow .st.running { color:var(--blue); }
+.idearow { display:flex; gap:14px; align-items:baseline; padding:8px 4px;
+  border-bottom:1px solid var(--soft); max-width:1000px; }
+.idearow .d { font-family:var(--mono); font-size:12px; color:var(--dim);
+  flex:0 0 86px; }
+.idearow .t { flex:1; min-width:0; color:var(--ink2); font-size:12.5px; }
+
+/* ================================================================ drawer */
+.drawer {
+  flex:0 0 auto; border-top:1px solid var(--hairline); background:var(--canvas);
+  display:flex; flex-direction:column; max-height:52vh;
+}
+.dhead {
+  display:flex; align-items:center; gap:12px; padding:10px 16px; cursor:pointer;
+  user-select:none; background:var(--pearl); border-bottom:1px solid transparent;
+}
+.dhead:hover { background:var(--parchment); }
+.drawer.open .dhead { border-bottom-color:var(--soft); }
+.dhead .t { font-weight:600; color:var(--blue); font-size:14px; }
+.dhead .s { color:var(--dim); font-size:12.5px; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dhead .spacer { flex:1; }
+.dhead .chev { color:var(--blue); font-size:11px; }
+.dbody { display:none; padding:14px 16px 16px; overflow:auto; }
+.drawer.open .dbody { display:block; }
+.askrow { display:flex; gap:9px; align-items:center; margin-bottom:11px; }
+.askrow input { flex:1; }
+.seeds { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:12px; }
+.seeds button { font-size:11.5px; padding:3px 12px; color:var(--dim); }
+.seeds button:hover { color:var(--blue); border-color:var(--blue); }
+.result { display:grid; grid-template-columns:120px 1fr; gap:9px 16px;
+  align-items:baseline; }
+.result .rk { color:var(--dim); font-size:12px; }
+.result .rv { color:var(--ink); font-size:14px; }
+.result .rv.say { color:var(--ink); font-size:17px; font-weight:600; }
+.result .rv.mono { font-family:var(--mono); font-size:12.5px; color:var(--ink2); }
+.result .rv.bad { color:var(--err); font-weight:600; }
+.result .rv .callrow { font-family:var(--mono); font-size:12.5px; color:var(--blue); }
+.hint { color:var(--faint); font-size:11.5px; margin-top:3px; }
 </style>
 </head>
 <body>
 
-<header>
-  <div class="brand">
-    <b>cat-server</b>
-    <span id="clock">connecting</span>
-  </div>
-  <div class="cells" id="cells"></div>
-</header>
+<div class="verdict ok" id="verdict" role="button" tabindex="0"
+     aria-expanded="false" aria-controls="detail">
+  <span class="brand">cat-server</span>
+  <span class="say" id="say">connecting to the dashboard</span>
+  <span class="also" id="also"></span>
+  <span class="spacer"></span>
+  <span class="now">
+    <span>profile <b id="nowprofile">…</b></span>
+    <span>voice <b id="nowvoicetop">…</b></span>
+  </span>
+  <button class="go" id="navrebuild">rebuild and restart</button>
+  <span class="stamp" id="stamp"></span>
+  <span class="chev" id="chev">&#9656;</span>
+</div>
+
+<div class="pending" id="pending">
+  <span class="txt" id="pendtxt"></span>
+  <span class="steps" id="steps" style="display:none">
+    <span class="st" data-s="write">writing config</span>
+    <span class="st" data-s="down">restarting</span>
+    <span class="st" data-s="boot">server booting</span>
+    <span class="st" data-s="live">live</span>
+  </span>
+  <button class="loud" id="pendgo">rebuild and restart</button>
+  <button id="penddrop" title="hide this until the next edit">later</button>
+</div>
+
+<div class="detail" id="detail"><p class="statusprose" id="statusprose"></p></div>
+
+<nav role="tablist" aria-label="dashboard sections">
+  <button class="tab" role="tab" data-tab="cat" aria-selected="true">
+    cat <span class="badge edit" id="badge-cat">edited</span>
+  </button>
+  <button class="tab" role="tab" data-tab="voices">voices</button>
+  <button class="tab" role="tab" data-tab="progress">progress</button>
+  <button class="tab" role="tab" data-tab="log">
+    log <span class="badge err" id="badge-log">0</span>
+  </button>
+  <button class="tab" role="tab" data-tab="files">files</button>
+</nav>
 
 <main>
-  <section class="logs">
-    <div class="toolbar">
-      <span class="title">log</span>
-      <input type="search" id="filter" placeholder="filter text" style="width:190px">
-      <span class="chip on" data-level="INFO">info</span>
-      <span class="chip on" data-level="WARNING">warning</span>
-      <span class="chip on" data-level="ERROR">error</span>
-      <label class="check"><input type="checkbox" id="hidelisten" checked> hide listen heartbeats</label>
-      <span class="spacer"></span>
-      <button id="clear">clear</button>
-    </div>
-    <div class="logwrap">
-      <div id="log"></div>
-      <button id="jump" class="primary">newest</button>
-    </div>
-    <div class="logfoot">
-      <span id="logcount">0 lines</span>
-      <span id="logstate">waiting for the stream</span>
-      <span id="scrollstate"></span>
+  <!-- ---------------------------------------------------------------- cat -->
+  <section class="pane on" id="pane-cat" role="tabpanel">
+    <div class="catwrap">
+      <aside class="secnav" id="secnav"></aside>
+      <div class="catbody" id="catbody"></div>
     </div>
   </section>
 
-  <aside>
-    <div class="tabs">
-      <button data-tab="config" class="on">config</button>
-      <button data-tab="abilities">abilities</button>
-      <button data-tab="voices">voices</button>
+  <!-- ------------------------------------------------------------- voices -->
+  <section class="pane" id="pane-voices" role="tabpanel">
+    <div class="vhead">
+      <div class="nowvoice" id="curvoice">
+        <span class="k">speaking as</span>
+        <span class="n" id="curname">…</span>
+        <span class="sub" id="cursub"></span>
+      </div>
+      <div class="vfilters">
+        <select id="vlang" aria-label="language"></select>
+        <select id="vgender" aria-label="gender">
+          <option selected>Female</option>
+          <option>Male</option>
+          <option value="">any gender</option>
+        </select>
+        <input type="search" id="vsearch" placeholder="search name" aria-label="search voice name">
+        <input type="text" id="sample" class="grow" aria-label="sample text">
+        <span class="vcount" id="vcount"></span>
+      </div>
     </div>
+    <div class="vlist" id="vlist"></div>
+  </section>
 
-    <div class="pane on" id="pane-config">
-      <div class="pad">
-        <div class="filelist" id="filelist"></div>
-        <p class="note">Nothing here holds a key. The dashboard never opens
-          <span style="font-family:var(--mono)">.env</span> or
-          <span style="font-family:var(--mono)">data/.config.yaml</span>, and the
-          <span style="font-family:var(--mono)">${PLACEHOLDERS}</span> below are what is on disk.</p>
-        <div class="toolbar" style="padding:0 0 8px; border:0; background:none">
-          <span class="title" id="filename" style="font-family:var(--mono); font-size:12px"></span>
+  <!-- ----------------------------------------------------------- progress -->
+  <section class="pane" id="pane-progress" role="tabpanel">
+    <div class="progbody" id="progbody"></div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- log -->
+  <section class="pane" id="pane-log" role="tabpanel">
+    <div class="toolbar">
+      <input type="search" id="filter" placeholder="filter text" style="width:220px">
+      <span class="chip on" data-level="INFO" role="checkbox" aria-checked="true" tabindex="0">info</span>
+      <span class="chip on" data-level="WARNING" role="checkbox" aria-checked="true" tabindex="0">warning</span>
+      <span class="chip on" data-level="ERROR" role="checkbox" aria-checked="true" tabindex="0">error</span>
+      <label class="check"><input type="checkbox" id="hidelisten" checked> hide listen heartbeats</label>
+      <span class="spacer"></span>
+      <span class="kbd"><b>/</b> filter <b>e</b> errors only <b>t</b> test box <b>1</b>-<b>5</b> tabs</span>
+      <button id="clear">clear the view</button>
+    </div>
+    <div class="logwrap">
+      <div id="log"></div>
+      <div class="empty" id="logempty">
+        <b>Nothing in the log yet.</b>
+        Start the container with <span class="mono">.\cat.ps1 up</span>.
+        Once it is running, every line the server writes shows up here as it happens.
+      </div>
+      <button id="jump" class="go">jump to newest</button>
+    </div>
+    <div class="logfoot">
+      <span id="logcount">0 lines</span>
+      <button id="errcount" style="display:none"></button>
+      <span class="grow"></span>
+      <span id="scrollstate"></span>
+      <span id="logstate">waiting for the stream</span>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------------- files -->
+  <section class="pane" id="pane-files" role="tabpanel">
+    <div class="split">
+      <div class="rail">
+        <div id="filelist"></div>
+        <p class="note">Nothing here holds a key. This browser never opens
+          <span class="mono">.env</span> or <span class="mono">data/.config.yaml</span>, and the
+          <span class="mono">${PLACEHOLDERS}</span> are what is on disk.</p>
+      </div>
+      <div class="editwrap">
+        <div class="toolbar">
+          <span class="path" id="filename"></span>
           <span class="spacer"></span>
           <button id="edit">edit</button>
-          <button id="save" class="primary" style="display:none">save</button>
-          <button id="cancel" style="display:none">cancel</button>
-          <button id="rebuild">rebuild and restart</button>
+          <button id="save" class="go" style="display:none">save</button>
+          <button id="cancel" style="display:none">discard</button>
         </div>
         <pre class="code" id="view"></pre>
-        <textarea class="code" id="editor" spellcheck="false" style="display:none"></textarea>
+        <textarea class="code" id="editor" spellcheck="false"
+          aria-label="config file contents"></textarea>
         <div class="msgline" id="cfgmsg"></div>
       </div>
     </div>
-
-    <div class="pane" id="pane-abilities"></div>
-
-    <div class="pane" id="pane-voices">
-      <div class="vhead">
-        <div id="curvoice" class="count"></div>
-        <div class="vfilters" style="margin-top:8px">
-          <select id="vlang"></select>
-          <select id="vgender">
-            <option selected>Female</option>
-            <option>Male</option>
-            <option value="">any gender</option>
-          </select>
-          <input type="search" id="vsearch" placeholder="search name">
-        </div>
-        <input type="text" id="sample" value="你好，我是你的小猫。Hello, I am your desk cat. 今天想聊点什么呢？">
-        <div class="count" id="vcount" style="margin-top:8px"></div>
-      </div>
-      <div class="vlist" id="vlist"></div>
-    </div>
-  </aside>
+  </section>
 </main>
+
+<!-- ----------------------------------------------------------- test drawer -->
+<div class="drawer" id="drawer">
+  <div class="dhead" id="dhead" role="button" tabindex="0">
+    <span class="t">test the cat</span>
+    <span class="s" id="dsum">say something to the server the way the cat would, and read what comes back</span>
+    <span class="spacer"></span>
+    <span class="chev" id="dchev">&#9652;</span>
+  </div>
+  <div class="dbody">
+    <div class="askrow">
+      <input type="text" id="talktext" placeholder="type what you would say out loud to the cat">
+      <button class="go" id="talkgo">say it</button>
+      <button id="talkhear" style="display:none">hear the reply</button>
+    </div>
+    <div class="seeds" id="seeds"></div>
+    <div class="result" id="talkout"></div>
+  </div>
+</div>
 
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
 const esc = s => String(s == null ? "" : s)
   .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const dot = k => '<span class="dot ' + k + '"></span>';
+const store = {
+  get(k, d) { try { return localStorage.getItem("catdash." + k) ?? d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("catdash." + k, v); } catch (e) {} },
+  del(k) { try { localStorage.removeItem("catdash." + k); } catch (e) {} },
+};
+function ago(sec) {
+  if (sec == null) return "";
+  if (sec < 60) return sec + " seconds ago";
+  const m = Math.round(sec / 60);
+  if (m < 60) return m === 1 ? "a minute ago" : m + " minutes ago";
+  const h = Math.round(m / 60);
+  return h === 1 ? "an hour ago" : h + " hours ago";
+}
 
-/* ------------------------------------------------------------------ header */
-function dot(kind) { return '<span class="dot ' + kind + '"></span>'; }
+/* ==================================================================== tabs */
+const TABS = ["cat", "voices", "progress", "log", "files"];
+/* #progress in the URL opens that tab, so a tab can be linked directly.
+   Otherwise the last-used tab wins, as before. */
+let tab = location.hash.slice(1) || store.get("tab", "cat");
+if (!TABS.includes(tab)) tab = "cat";
 
-function renderStatus(s) {
-  if (!s.ready) { $("#clock").textContent = "starting"; return; }
-  $("#clock").textContent = "as of " + s.at;
-  const cells = [];
+function show(name) {
+  tab = name;
+  store.set("tab", name);
+  $$("nav .tab").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
+  $$(".pane").forEach(p => p.classList.toggle("on", p.id === "pane-" + name));
+  if (name === "log") { unseenErrors = 0; paintBadges(); if (follow) toBottom(); }
+  if (name === "progress") loadProgress();
+}
+$$("nav .tab").forEach((b, i) => {
+  b.onclick = () => show(b.dataset.tab);
+  b.onkeydown = ev => {
+    if (ev.key !== "ArrowRight" && ev.key !== "ArrowLeft") return;
+    ev.preventDefault();
+    const t = $$("nav .tab");
+    const n = t[(i + (ev.key === "ArrowRight" ? 1 : t.length - 1)) % t.length];
+    n.focus(); show(n.dataset.tab);
+  };
+});
+document.addEventListener("keydown", ev => {
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
+    if (ev.key === "Escape" && document.activeElement.id === "filter") {
+      $("#filter").value = ""; redraw(); document.activeElement.blur();
+    }
+    return;
+  }
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if (/^[1-5]$/.test(ev.key)) { ev.preventDefault(); show(TABS[+ev.key - 1]); return; }
+  if (ev.key === "/") { ev.preventDefault(); show("log"); $("#filter").focus(); return; }
+  if (ev.key === "e") { ev.preventDefault(); show("log"); errorsOnly(); return; }
+  if (ev.key === "t") { ev.preventDefault(); openDrawer(true); $("#talktext").focus(); }
+});
 
-  cells.push(["container",
-    dot(s.container_up ? "on" : "bad") + esc(s.container || "not running")]);
+/* ================================================================ verdict */
+let lastStatus = null, live = false, building = false, buildStep = "", prevBad = false;
 
-  cells.push(["profile", esc(s.profile || "none built"), "",
-    s.description || ""]);
+/* The cat does not hold its socket open. It dials in when woken and hangs up
+   when the conversation ends, so "not connected" is the resting state of a cat
+   that is switched on and working. Only a cat that has never called at all is
+   worth an alarm. */
+function readState(s) {
+  const bad = [], watch = [], clauses = [];
+  const val = v => '<span class="v">' + esc(v) + '</span>';
+  const say = (rank, dotKind, html, go) =>
+    clauses.push({ rank, dot: dotKind, html, go: go || null });
 
-  cells.push(["ota 8003",
-    dot(s.ota === 200 ? "on" : "bad") + (s.ota ? s.ota : "no answer")]);
+  if (!s.container_up) {
+    bad.push("the container is not running");
+    say("bad", "bad", "The container is not running.", { tab: "log" });
+  } else {
+    say("quiet", "on", "The container is " + val(s.container) + ".");
+  }
+
+  if (s.ota !== 200) {
+    bad.push("the server is not answering on 8003");
+    say("bad", "bad",
+      (s.ota ? "The server answers " + val("http " + s.ota) + " on 8003"
+             : "The server is not answering on " + val("8003")) +
+      ", where the cat fetches its config at boot.", { tab: "log" });
+  } else {
+    say("quiet", "on", "The server is answering on " + val("8003") + ".");
+  }
+
+  if (s.log_stream === false) {
+    watch.push("the log stream stopped");
+    say("watch", "warn",
+      "The log stream stopped, so docker compose logs is no longer attached.",
+      { tab: "log" });
+  }
 
   const d = s.device;
-  if (d) {
-    cells.push(["device",
-      dot(s.connected ? "on" : "off") + esc(d.device_id),
-      esc(d.ip) + " at " + esc(d.at),
-      d.device_id + " from " + d.ip + ", last seen at " + d.at +
-        (d.agent ? ", " + d.agent : "")]);
+  if (s.link === "talking") {
+    say("quiet", "on", "The cat is talking right now" +
+      (d ? ", as " + val(d.device_id) + " at " + val(d.ip) : "") + ".");
+  } else if (s.link === "idle") {
+    say("quiet", "on", "The cat is idle and last spoke " + val(ago(s.since)) +
+      (d ? ", as " + val(d.device_id) + " at " + val(d.ip) : "") +
+      ". It hangs up between conversations, so this is normal while it is on.");
   } else {
-    cells.push(["device", dot("off") + "none yet", "no conn line in the log"]);
+    watch.push("no cat has called since the server started");
+    say("watch", "off", "No cat has called since the server started. " +
+      "Check the address in its wifi portal and that it is powered on.");
+  }
+  if (s.test_cat) {
+    say("quiet", "warn",
+      "The test rig is attached as the fake cat from the test box.");
   }
 
   const b = s.bridge;
-  cells.push(["push bridge 8004",
-    b === null ? dot("off") + "not up yet"
-               : dot(b.length ? "on" : "warn") + (b.length + " connected")]);
+  if (b === null) {
+    watch.push("the push bridge on 8004 is not up");
+    say("watch", "warn", "The push bridge on " + val("8004") + " is not up, " +
+      "so nothing can push a face or a sentence to the cat.");
+  } else {
+    say("quiet", b.length ? "on" : "off", "The push bridge on " + val("8004") +
+      " is up with " + (b.length
+        ? val(b.length + (b.length === 1 ? " socket" : " sockets")) + " open."
+        : "no open socket."));
+  }
 
   const h = s.helpers || {};
   for (const key of Object.keys(h)) {
     const v = h[key];
-    cells.push([v.label,
-      dot(v.state === "running" ? "on" : v.state === "unknown" ? "warn" : "off")
-        + esc(v.state),
-      "", v.what]);
+    if (v.state === "running") {
+      say("quiet", "on", "The " + esc(v.label) + " is running.");
+    } else if (v.state === "unknown") {
+      watch.push("cannot tell whether the " + v.label + " is running");
+      say("watch", "warn", "Whether the " + esc(v.label) +
+        " is running cannot be told from here.");
+    } else {
+      watch.push("the " + v.label + " is stopped");
+      say("watch", "off", "The " + esc(v.label) + " is stopped. It " +
+        esc(v.what) + " when it runs.");
+    }
   }
 
-  $("#cells").innerHTML = cells.map(c =>
-    '<div class="cell" title="' + esc(c[3] || c[0]) + '">' +
-    '<span class="k">' + esc(c[0]) + '</span>' +
-    '<span class="v">' + c[1] + '</span>' +
-    (c[2] ? '<span class="v sub">' + c[2] + '</span>' : '') +
-    '</div>').join("");
+  const bs = s.build || {};
+  if (bs.never_built) {
+    bad.push("this profile has never been built");
+    say("bad", "bad",
+      "This profile has never been built, so nothing of it is live.",
+      { tab: "files" });
+  } else if (bs.edited) {
+    watch.push("config has changed since the last build");
+    say("watch", "warn", "Something under " + val("config/") + " changed " +
+      "after the last build, so the container is running the previous version.",
+      { tab: "files" });
+  } else if (bs.profile_switched) {
+    watch.push("a different profile is built than the one selected");
+    say("watch", "warn", "The container is running " + val(bs.built_profile) +
+      " while " + val(bs.profile) + " is selected.", { tab: "files" });
+  } else if (bs.stale_container) {
+    watch.push("the container has not restarted since the last build");
+    say("watch", "warn", "The build is newer than the running container, " +
+      "so a restart is needed.");
+  } else if (bs.unknown) {
+    say("quiet", "off", "The build state is unknown until the next build, " +
+      "because the last one came before the dashboard recorded build stamps.");
+  } else {
+    say("quiet", "on", "The build is in sync, so " + val("config/") +
+      " matches what the container is running.");
+  }
+
+  if (s.profile) {
+    say("quiet", "", "The profile is " + val(s.profile) + ", " +
+      esc((s.description || "with no description in profile.yaml")
+        .replace(/[.\s]+$/, "")) + ".",
+      { file: "config/profiles/" + s.profile + "/profile.yaml" });
+  } else {
+    say("quiet", "off", "No profile has been built yet.");
+  }
+
+  const rank = { bad: 0, watch: 1, quiet: 2 };
+  clauses.sort((a, b2) => rank[a.rank] - rank[b2.rank]);
+  return { bad, watch, clauses };
 }
 
-let statusTimer = null;
+function renderStatus(s) {
+  const v = $("#verdict");
+  lastStatus = s;
+  const wasLive = live;
+  live = s.link === "talking";
+  if (wasLive !== live) loadAbilitiesSoon();
+
+  if (s.error) {
+    v.className = "verdict bad";
+    $("#say").textContent = "the dashboard hit an error: " + s.error;
+    return;
+  }
+  if (!s.ready) { $("#say").textContent = "reading the state of the server"; return; }
+
+  advanceBuild(s);
+
+  const r = readState(s);
+  if (totalErrors) {
+    r.watch.unshift(totalErrors === 1 ? "1 error in the log"
+      : totalErrors + " errors in the log");
+    const at = r.clauses.findIndex(c => c.rank !== "bad");
+    r.clauses.splice(at === -1 ? r.clauses.length : at, 0, {
+      rank: "watch", dot: "warn", go: { tab: "log" },
+      html: (totalErrors === 1
+        ? 'There is <span class="v">1 error</span>'
+        : 'There are <span class="v">' + totalErrors + " errors</span>") +
+        " in the log.",
+    });
+  }
+  $("#stamp").textContent = s.at;
+  $("#nowprofile").textContent = s.profile || "none";
+  $("#nowvoicetop").textContent = s.voice || "unset";
+
+  if (building) {
+    v.className = "verdict watch";
+    $("#say").textContent = "rebuilding, " + buildLabel();
+    $("#also").textContent = "";
+  } else if (r.bad.length) {
+    v.className = "verdict bad";
+    $("#say").textContent = r.bad[0];
+    const rest = r.bad.length - 1 + r.watch.length;
+    $("#also").textContent = rest ? "and " + rest + " more to look at" : "";
+  } else if (r.watch.length) {
+    v.className = "verdict watch";
+    $("#say").textContent = r.watch[0];
+    $("#also").textContent = r.watch.length > 1
+      ? "and " + (r.watch.length - 1) + " more to look at" : "";
+  } else {
+    v.className = "verdict ok";
+    $("#say").textContent = s.link === "talking"
+      ? "everything is up and the cat is talking"
+      : "everything is up, the cat is idle and ready";
+    $("#also").textContent = "";
+  }
+
+  // Something newly broken opens the facts on its own, so the first click is
+  // never spent finding out what.
+  if (r.bad.length && !prevBad && !$("#detail").classList.contains("show")) {
+    toggleDetail();
+  }
+  prevBad = r.bad.length > 0;
+
+  $("#statusprose").innerHTML = r.clauses.map(c => {
+    const inner = dot(c.dot) + c.html;
+    if (c.go && c.go.tab) return '<a class="cl ' + c.rank + '" data-gotab="' +
+      esc(c.go.tab) + '">' + inner + "</a>";
+    if (c.go && c.go.file) return '<a class="cl ' + c.rank + '" data-gofile="' +
+      esc(c.go.file) + '">' + inner + "</a>";
+    return '<span class="cl ' + c.rank + '">' + inner + "</span>";
+  }).join(" ");
+
+  paintPending(s);
+}
+
+function toggleDetail() {
+  const open = $("#detail").classList.toggle("show");
+  $("#verdict").setAttribute("aria-expanded", String(open));
+  $("#chev").innerHTML = open ? "&#9662;" : "&#9656;";
+  store.set("detail", open ? "1" : "0");
+}
+$("#verdict").onclick = toggleDetail;
+$("#verdict").onkeydown = ev => {
+  if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleDetail(); }
+};
+if (store.get("detail", "0") === "1") toggleDetail();
+
+// A clause whose subject lives on another tab or in a config file is a link.
+$("#statusprose").addEventListener("click", ev => {
+  const a = ev.target.closest("a[data-gotab], a[data-gofile]");
+  if (!a) return;
+  if (a.dataset.gotab) show(a.dataset.gotab);
+  else openFileByPath(a.dataset.gofile);
+});
+
 async function pollStatus() {
   try {
-    const r = await fetch("/api/status");
-    renderStatus(await r.json());
-  } catch (e) { $("#clock").textContent = "dashboard unreachable"; }
-  statusTimer = setTimeout(pollStatus, 3000);
+    renderStatus(await (await fetch("/api/status")).json());
+  } catch (e) {
+    $("#verdict").className = "verdict bad";
+    $("#say").textContent = "the dashboard server stopped answering";
+    $("#also").textContent = "restart it with .\\cat.ps1 dash";
+  }
+  setTimeout(pollStatus, 3000);
 }
 
-/* -------------------------------------------------------------------- logs */
+/* ======================================================== pending rebuild */
+/* Drift is computed on the server from a hash of config/ against the stamp the
+   builder writes, so it survives a reload, an edit made in an editor, and a
+   rebuild run from PowerShell. The browser is never the source of truth here. */
+let snoozed = false;
+
+function paintPending(s) {
+  const b = (s && s.build) || {};
+  const el = $("#pending");
+  const drift = b.edited || b.never_built || b.profile_switched || b.stale_container;
+
+  if (building) {
+    el.classList.add("show", "building");
+    $("#steps").style.display = "flex";
+    $("#pendtxt").innerHTML = "Rebuilding.<small>The cat drops its connection and " +
+      "picks it back up on the next wake word.</small>";
+    $("#pendgo").disabled = true;
+    $("#penddrop").style.display = "none";
+    paintSteps();
+    return;
+  }
+  el.classList.remove("building");
+  $("#steps").style.display = "none";
+  $("#pendgo").disabled = false;
+  $("#penddrop").style.display = "";
+
+  if (!drift || snoozed) { el.classList.remove("show"); return; }
+  el.classList.add("show");
+  let why = "";
+  if (b.never_built) why = "This profile has never been built, so nothing of it is live.";
+  else if (b.profile_switched) why = "The container is running " + b.built_profile +
+    ", not " + b.profile + ".";
+  else if (b.edited) why = "Something under config/ changed after the last build.";
+  else why = "The build is newer than the running container.";
+  $("#pendtxt").innerHTML = "Changes are on disk but not live yet.<small>" + esc(why) +
+    " Rebuilding takes about half a minute.</small>";
+}
+
+function paintSteps() {
+  const order = ["write", "down", "boot", "live"];
+  const at = order.indexOf(buildStep);
+  $$("#steps .st").forEach(el => {
+    const i = order.indexOf(el.dataset.s);
+    el.classList.toggle("on", i === at);
+    el.classList.toggle("done", i < at);
+  });
+}
+function buildLabel() {
+  return { write: "writing the config", down: "the container is restarting",
+    boot: "the server is booting", live: "live" }[buildStep] || "working";
+}
+function advanceBuild(s) {
+  if (!building) return;
+  if (!s.container_up) buildStep = "down";
+  else if (s.ota !== 200) buildStep = "boot";
+  else if (buildStep === "boot" || buildStep === "down") buildStep = "live";
+  paintSteps();
+}
+
+$("#penddrop").onclick = () => { snoozed = true; paintPending(lastStatus); };
+$("#pendgo").onclick = () => doRebuild();
+// It sits inside the verdict bar, whose own click toggles the detail strip.
+$("#navrebuild").onclick = ev => { ev.stopPropagation(); doRebuild(); };
+
+async function doRebuild(profile) {
+  if (live && !confirm(
+      "The cat is mid-conversation. Rebuilding cuts it off. Go ahead?")) return;
+  building = true; buildStep = "write"; snoozed = false;
+  paintPending(lastStatus);
+  $("#navrebuild").disabled = true;
+  let d = null;
+  try {
+    d = await (await fetch("/api/rebuild", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profile ? { profile } : {})
+    })).json();
+  } catch (e) {
+    d = { ok: false, output: "the rebuild request never came back. " +
+      "Check the terminal running the dashboard." };
+  }
+  // Wait for the server to answer again rather than calling the subprocess
+  // exiting "done". docker compose restart returns before the server binds.
+  if (d && d.ok) {
+    const until = Date.now() + 90000;
+    while (Date.now() < until) {
+      await new Promise(r => setTimeout(r, 1200));
+      if (lastStatus && lastStatus.container_up && lastStatus.ota === 200
+          && buildStep === "live") break;
+    }
+  }
+  building = false;
+  $("#navrebuild").disabled = false;
+  paintPending(lastStatus);
+  if (d && !d.ok) {
+    alert("The rebuild did not finish:\n\n" + (d.error || d.output || "no output"));
+  }
+  loadSettings(); loadVoices();
+  seedTest(d && d.ok ? "rebuild" : null);
+}
+
+/* =================================================================== logs */
 const MAX_ROWS = 4000;
-let entries = [];
-let follow = true;
+let entries = [], follow = true, unseenErrors = 0, totalErrors = 0, lastSeq = 0;
 const logEl = $("#log");
 const levels = { INFO:true, WARNING:true, ERROR:true };
-
-function bucket(level) {
-  if (level === "ERROR" || level === "CRITICAL") return "ERROR";
-  if (level === "WARNING") return "WARNING";
-  return "INFO";
-}
+const bucket = l => (l === "ERROR" || l === "CRITICAL") ? "ERROR"
+  : l === "WARNING" ? "WARNING" : "INFO";
 
 function passes(e) {
   if (!levels[bucket(e.level)]) return false;
@@ -362,7 +1129,6 @@ function passes(e) {
   if (q && !(e.msg + " " + e.module).toLowerCase().includes(q)) return false;
   return true;
 }
-
 function rowHtml(e) {
   const b = bucket(e.level);
   const cls = b === "ERROR" ? "error" : b === "WARNING" ? "warn" : "info";
@@ -372,65 +1138,96 @@ function rowHtml(e) {
     const re = new RegExp("(" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi");
     msg = msg.replace(re, "<mark>$1</mark>");
   }
-  return '<div class="row ' + cls + '">' +
+  return '<div class="lrow ' + cls + '">' +
     '<span class="ts">' + esc(e.t.slice(7)) + '</span>' +
     '<span class="mod">' + esc(e.module) + '</span>' +
     '<span class="msg">' + msg + '</span></div>';
 }
-
+function paintCounts(shown) {
+  $("#logcount").textContent = shown + " of " + entries.length + " lines";
+  const el = $("#errcount");
+  el.textContent = totalErrors + (totalErrors === 1 ? " error, show it" : " errors, show them");
+  el.style.display = totalErrors ? "inline-block" : "none";
+  $("#logempty").style.display = entries.length ? "none" : "block";
+}
 function redraw() {
   const shown = entries.filter(passes);
   logEl.innerHTML = shown.map(rowHtml).join("");
-  $("#logcount").textContent = shown.length + " of " + entries.length + " lines";
+  paintCounts(shown.length);
   if (follow) toBottom();
 }
-
-function toBottom() {
-  logEl.scrollTop = logEl.scrollHeight;
-}
+const toBottom = () => { logEl.scrollTop = logEl.scrollHeight; };
 
 function append(e) {
+  // The stream replays its backlog to every new subscriber, and EventSource
+  // reconnects on its own, so without this every reconnect counts its errors
+  // a second time and the number on the bar becomes arithmetic.
+  if (e.i && e.i <= lastSeq) return;
+  if (e.i) lastSeq = e.i;
   entries.push(e);
   if (entries.length > MAX_ROWS) entries = entries.slice(-MAX_ROWS);
-  if (!passes(e)) return;
+  if (bucket(e.level) === "ERROR") {
+    totalErrors++;
+    if (lastStatus) renderStatus(lastStatus);
+    if (tab !== "log") { unseenErrors++; paintBadges(); }
+  }
+  if (!passes(e)) { paintCounts(logEl.childElementCount); return; }
   const wasFollowing = follow;
   logEl.insertAdjacentHTML("beforeend", rowHtml(e));
   while (logEl.childElementCount > MAX_ROWS) logEl.removeChild(logEl.firstChild);
-  $("#logcount").textContent =
-    logEl.childElementCount + " of " + entries.length + " lines";
+  paintCounts(logEl.childElementCount);
   if (wasFollowing) toBottom();
 }
-
+function errorsOnly() {
+  levels.INFO = false; levels.WARNING = false; levels.ERROR = true;
+  $$(".chip[data-level]").forEach(c => {
+    const on = levels[c.dataset.level];
+    c.classList.toggle("on", on);
+    c.setAttribute("aria-checked", String(on));
+  });
+  redraw();
+}
+function paintBadges() {
+  const b = $("#badge-log");
+  b.textContent = unseenErrors;
+  b.classList.toggle("show", unseenErrors > 0);
+}
 logEl.addEventListener("scroll", () => {
   const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 30;
   follow = atBottom;
   $("#jump").style.display = atBottom ? "none" : "block";
   $("#scrollstate").textContent = atBottom ? "" : "scrolled up, paused";
 });
-$("#jump").onclick = () => { follow = true; toBottom(); $("#jump").style.display = "none";
-  $("#scrollstate").textContent = ""; };
+$("#jump").onclick = () => {
+  follow = true; toBottom(); $("#jump").style.display = "none";
+  $("#scrollstate").textContent = "";
+};
+$("#errcount").onclick = errorsOnly;
 $("#filter").addEventListener("input", redraw);
 $("#hidelisten").addEventListener("change", redraw);
+// Clearing empties the view. It does not touch the error count, because the
+// errors are still in the container's log and hiding them here would not
+// unmake them.
 $("#clear").onclick = () => { entries = []; redraw(); };
-document.querySelectorAll(".chip[data-level]").forEach(c => {
-  c.onclick = () => {
+$$(".chip[data-level]").forEach(c => {
+  const flip = () => {
     const lvl = c.dataset.level;
     levels[lvl] = !levels[lvl];
     c.classList.toggle("on", levels[lvl]);
+    c.setAttribute("aria-checked", String(levels[lvl]));
     redraw();
   };
+  c.onclick = flip;
+  c.onkeydown = ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); flip(); } };
 });
-
 function openStream() {
   const src = new EventSource("/api/logs");
   src.onopen = () => { $("#logstate").textContent = "streaming"; };
   src.onmessage = ev => append(JSON.parse(ev.data));
-  src.onerror = () => {
-    $("#logstate").textContent = "stream dropped, retrying";
-  };
+  src.onerror = () => { $("#logstate").textContent = "stream dropped, retrying"; };
 }
 
-/* ------------------------------------------------------- syntax highlight */
+/* ====================================================== syntax highlight */
 function hlYaml(text) {
   return text.split("\n").map(line => {
     const e = esc(line);
@@ -452,11 +1249,10 @@ function hlValue(s) {
 function hlJson(text) {
   return esc(text).replace(
     /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?/g,
-    (m, str, colon, lit) => {
+    (m, str, colon) => {
       if (str) return colon
         ? '<span class="tok-key">' + str + '</span><span class="tok-pun">' + colon + '</span>'
         : '<span class="tok-str">' + str + '</span>';
-      if (lit) return '<span class="tok-num">' + m + '</span>';
       return '<span class="tok-num">' + m + '</span>';
     });
 }
@@ -470,12 +1266,12 @@ function highlight(text, kind) {
   return hlMarkdown(text);
 }
 
-/* ------------------------------------------------------------------ config */
-let files = [], openFile = null, openKind = "yaml";
+/* ================================================================== files */
+let files = [], openFile = null, openKind = "yaml", saved = "", editing = false;
+const dirty = () => editing && $("#editor").value !== saved;
 
 async function loadConfigList() {
-  const r = await fetch("/api/config");
-  const d = await r.json();
+  const d = await (await fetch("/api/config")).json();
   files = d.files;
   const groups = [];
   for (const f of files) {
@@ -484,31 +1280,37 @@ async function loadConfigList() {
     g.items.push(f);
   }
   $("#filelist").innerHTML = groups.map(g =>
-    '<span class="lbl">' + esc(g.name === "shared" ? "config/" : "profiles/" + g.name + "/") + '</span>' +
-    g.items.map(f => '<button class="filebtn" data-id="' + esc(f.id) + '">' +
-      esc(f.label) + '</button>').join("")).join("");
-  document.querySelectorAll(".filebtn").forEach(b => {
-    b.onclick = () => openConfig(b.dataset.id);
-  });
+    '<div class="lbl">' + esc(g.name === "shared" ? "config/" : "profiles/" + g.name + "/") + '</div>' +
+    g.items.map(f => '<button data-id="' + esc(f.id) + '">' + esc(f.label) +
+      '<span class="mark">&#9679;</span></button>').join("")).join("");
+  $$("#filelist button").forEach(b => { b.onclick = () => openConfig(b.dataset.id); });
   if (!openFile && files.length) openConfig(files[0].id);
 }
 
 async function openConfig(id) {
-  const r = await fetch("/api/config/file?id=" + encodeURIComponent(id));
-  const d = await r.json();
+  if (dirty() && !confirm("You have unsaved edits in this file. Leave them behind?")) return;
+  const d = await (await fetch("/api/config/file?id=" + encodeURIComponent(id))).json();
   if (d.error) { setCfgMsg(d.error, false); return; }
-  openFile = id; openKind = d.kind;
-  document.querySelectorAll(".filebtn").forEach(b =>
-    b.classList.toggle("on", b.dataset.id === id));
-  $("#filename").textContent = d.group === "shared"
-    ? "config/" + d.label : "config/profiles/" + d.group + "/" + d.label;
+  openFile = id; openKind = d.kind; saved = d.text;
+  $$("#filelist button").forEach(b => {
+    b.classList.toggle("on", b.dataset.id === id);
+    b.classList.remove("dirty");
+  });
+  const dir = d.group === "shared" ? "config/" : "config/profiles/" + d.group + "/";
+  $("#filename").innerHTML = '<span class="dir">' + esc(dir) + '</span>' + esc(d.label);
   $("#view").innerHTML = highlight(d.text, d.kind);
   $("#editor").value = d.text;
   showView();
   setCfgMsg("", true);
 }
-
+function openFileByPath(path) {
+  show("files");
+  const id = path.startsWith("config/profiles/")
+    ? path.replace("config/", "") : path.replace("config/", "");
+  if (files.some(f => f.id === id)) openConfig(id);
+}
 function showView() {
+  editing = false;
   $("#view").style.display = "block";
   $("#editor").style.display = "none";
   $("#edit").style.display = "inline-block";
@@ -516,144 +1318,632 @@ function showView() {
   $("#cancel").style.display = "none";
 }
 function showEdit() {
+  editing = true;
   $("#view").style.display = "none";
   $("#editor").style.display = "block";
   $("#edit").style.display = "none";
   $("#save").style.display = "inline-block";
   $("#cancel").style.display = "inline-block";
+  $("#save").disabled = true;
+  $("#editor").focus();
 }
 function setCfgMsg(text, ok) {
   const el = $("#cfgmsg");
   el.textContent = text;
-  el.className = "msgline " + (text ? (ok ? "ok" : "bad") : "");
+  el.className = "msgline " + (text ? (ok ? "show ok" : "show bad") : "");
 }
-
+$("#editor").addEventListener("input", () => { $("#save").disabled = !dirty(); });
 $("#edit").onclick = showEdit;
-$("#cancel").onclick = () => { openConfig(openFile); };
+$("#cancel").onclick = () => { $("#editor").value = saved; openConfig(openFile); };
 $("#save").onclick = async () => {
   $("#save").disabled = true;
   setCfgMsg("saving", true);
-  const r = await fetch("/api/config/file", {
+  const d = await (await fetch("/api/config/file", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: openFile, text: $("#editor").value })
-  });
-  const d = await r.json();
-  $("#save").disabled = false;
-  if (d.error) { setCfgMsg(d.error, false); return; }
-  $("#view").innerHTML = highlight($("#editor").value, openKind);
+  })).json();
+  if (d.error) { setCfgMsg(d.error, false); $("#save").disabled = false; return; }
+  saved = $("#editor").value;
+  $("#view").innerHTML = highlight(saved, openKind);
   showView();
   setCfgMsg("saved " + d.saved + ". " + d.note, true);
+  snoozed = false;
+  loadSettings();
 };
-$("#rebuild").onclick = async () => {
-  $("#rebuild").disabled = true;
-  setCfgMsg("building the profile and restarting the container", true);
-  const r = await fetch("/api/rebuild", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({})
+
+/* ================================================================ the cat */
+let SET = null, ABIL = null;
+
+const SECTIONS = [
+  { id: "identity",  hue: "teal",   label: "Who it is" },
+  { id: "voice",     hue: "violet", label: "How it sounds" },
+  { id: "abilities", hue: "blue",   label: "What it can do" },
+  { id: "talking",   hue: "amber",  label: "How it listens" },
+  { id: "rituals",   hue: "violet", label: "What it says on its own" },
+  { id: "brain",     hue: "teal",   label: "What thinks for it" },
+  { id: "walls",     hue: "rose",   label: "Not settable here" },
+];
+function paintSecNav() {
+  $("#secnav").innerHTML = '<div class="lead">the cat</div>' + SECTIONS.map(s =>
+    '<a data-go="sec-' + s.id + '">' + esc(s.label) + '</a>').join("");
+  $$("#secnav a").forEach(a => {
+    a.onclick = () => {
+      const el = document.getElementById(a.dataset.go);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      $$("#secnav a").forEach(x => x.classList.toggle("on", x === a));
+    };
   });
-  const d = await r.json();
-  $("#rebuild").disabled = false;
-  setCfgMsg(d.error || d.output || "done", !d.error && d.ok);
-  loadAbilities(); loadVoices();
-};
-
-/* --------------------------------------------------------------- abilities */
-function classify(name) {
-  if (name.startsWith("self_")) return "the cat's body";
-  if (name === "handle_exit_intent" || name === "get_lunar") return "built into the server";
-  return "";
 }
 
+async function loadSettings() {
+  let d;
+  try { d = await (await fetch("/api/settings")).json(); } catch (e) { return; }
+  SET = d;
+  renderCat();
+}
+let abilTimer = null;
+function loadAbilitiesSoon() { clearTimeout(abilTimer); abilTimer = setTimeout(loadAbilities, 400); }
 async function loadAbilities() {
-  const r = await fetch("/api/abilities");
-  const d = await r.json();
-  const mcpTools = new Set();
-  for (const s of d.servers) for (const t of s.tools) mcpTools.add(t);
-
-  let html = '<div class="group"><h3>callable right now</h3>';
-  if (d.functions.length) {
-    html += '<p class="note">Read out of the log at ' + esc(d.functions_at) +
-      '. This is the list the server handed the model on the last connection, ' +
-      'so it is what the cat can do rather than what the docs say it can do.</p>';
-    html += d.functions.map(f => {
-      let tag = classify(f);
-      if (!tag && mcpTools.has(f)) tag = "from mcp";
-      return '<div class="tool"><span class="n">' + esc(f) + '</span>' +
-        (tag ? '<span class="tag">' + esc(tag) + '</span>' : '') + '</div>';
-    }).join("");
-  } else {
-    html += '<p class="note">Nothing yet. The list only appears once a cat ' +
-      'connects, real or fake. Try <span style="font-family:var(--mono)">.\\cat.ps1 talk</span>.</p>';
-  }
-  html += '</div>';
-
-  html += '<div class="group"><h3>mcp servers in this profile</h3>';
-  if (d.servers.length) {
-    html += d.servers.map(s => {
-      const kind = s.state === "connected" ? "on" : s.state === "closed" ? "off" : "warn";
-      return '<div class="srv"><div class="head">' + dot(kind) +
-        '<span>' + esc(s.name) + '</span>' +
-        '<span class="tag" style="margin-left:auto">' + esc(s.transport) + '</span></div>' +
-        '<div class="meta">' + esc(s.target) + '</div>' +
-        '<div class="meta">' + esc(s.state) + (s.at ? " at " + esc(s.at) : "") + '</div>' +
-        (s.tools.length ? '<div class="tools">' + s.tools.map(t =>
-          '<div class="tool"><span class="n">' + esc(t) + '</span></div>').join("") + '</div>' : '') +
-        '</div>';
-    }).join("");
-  } else {
-    html += '<p class="note">This profile lists no MCP servers, so everything the ' +
-      'cat can do comes from its own body.</p>';
-  }
-  html += '</div>';
-
-  html += '<div class="group"><h3>bundled plugins, all off</h3>' +
-    '<p class="note">Switched off in config/base.yaml, with the reason for each one ' +
-    'taken from the comment there. Turning one on tells the model it can do ' +
-    'something it will then fail at out loud.</p>' +
-    d.plugins.map(p => '<div class="plug"><span class="n">' + esc(p.name) +
-      '</span><span class="why">' + esc(p.reason) + '</span></div>').join("") +
-    '</div>';
-
-  $("#pane-abilities").innerHTML = html;
+  try { ABIL = await (await fetch("/api/abilities")).json(); } catch (e) { return; }
+  renderCat();
 }
 
-/* ------------------------------------------------------------------ voices */
-let voices = [], current = "", currentLang = "";
-let player = new Audio();
+function field(o) {
+  return '<div class="field" data-f="' + esc(o.id) + '">' +
+    '<div class="lab"><label for="in-' + esc(o.id) + '">' + esc(o.label) + '</label>' +
+    (o.src ? '<span class="src' + (o.src.inherit ? " inherit" : "") + '" data-open="' +
+      esc(o.src.file || "") + '">' + esc(o.src.text) + '</span>' : '') +
+    '</div>' +
+    (o.help ? '<p class="help">' + o.help + '</p>' : '') +
+    '<div class="row">' + o.control +
+    '<button class="save go" data-save="' + esc(o.id) + '">save</button></div>' +
+    '<div class="fmsg" data-msg="' + esc(o.id) + '"></div></div>';
+}
+
+function srcOf(node, files) {
+  const s = node && node.source;
+  if (s === "profile") return { text: "profile", file: files.profile };
+  if (s === "base") return { text: "base.yaml", file: files.base };
+  if (s === "image") return { text: "inherited from the image", inherit: true, file: "" };
+  return { text: "not set", inherit: true, file: "" };
+}
+
+function renderCat() {
+  if (!SET) return;
+  const f = SET.files || {};
+  const A = ABIL || { functions: [], servers: [], docs: {}, plugins: [] };
+  let h = "";
+
+  /* ---------------------------------------------------------- who it is */
+  h += sec("identity", "teal", "Who it is",
+    "The profile decides everything else on this page. Switching it swaps the " +
+    "persona, the voice, the model and the tool list in one move.");
+  h += '<div class="field"><div class="lab"><label>Profile</label>' +
+    '<span class="src" data-open="' + esc(f.profile || "") + '">' +
+    esc(f.profile || "") + '</span></div>' +
+    '<p class="help">Same hardware, same server, a different cat. ' +
+    '<span class="mono">desk-cat</span> is the one to fall back to when ' +
+    'something else is misbehaving.</p><div class="row">' +
+    '<select id="in-profile">' + (SET.profiles || []).map(p =>
+      '<option value="' + esc(p.name) + '"' + (p.name === SET.profile ? " selected" : "") +
+      '>' + esc(p.name) + ' — ' + esc(p.description) + '</option>').join("") +
+    '</select><button class="save go" id="switchprofile">switch and rebuild</button>' +
+    '</div></div>';
+
+  h += field({
+    id: "persona", label: "Name and personality",
+    help: "Everything the cat believes about itself, in its own words. Its name " +
+      "lives in here rather than in a field of its own, because the model only " +
+      "ever reads this as prose. It is spoken out loud, so no lists and no markdown.",
+    src: { text: "prompt.md", file: f.prompt },
+    control: '<textarea id="in-persona" rows="12" spellcheck="false">' +
+      esc(SET.persona || "") + '</textarea>',
+  });
+  h += field({
+    id: "description", label: "What this profile is for",
+    help: "One line. It shows up in the profile picker above and in the status bar.",
+    src: { text: "profile.yaml", file: f.profile },
+    control: '<input type="text" id="in-description" value="' +
+      esc(SET.description || "") + '">',
+  });
+  h += "</section>";
+
+  /* ------------------------------------------------------ how it sounds */
+  h += sec("voice", "violet", "How it sounds",
+    "The voice and the language it writes in are one setting in two halves. " +
+    "The server hardcodes the output language into the prompt, so a voice and a " +
+    "language that disagree produce a cat reading one language in another's accent.");
+  const lang = SET.language || {};
+  if (lang.mismatch) {
+    h += '<div class="warnbox"><div><b>The voice and the language do not match.</b>' +
+      '<span>This profile speaks with <span class="mono">' + esc(SET.voice.value) +
+      '</span> but tells the model to write in <span class="mono">' + esc(lang.value) +
+      '</span>. It should be <span class="mono">' + esc(lang.should_be) + '</span>. ' +
+      'Picking the voice again on the voices tab writes both lines together.</span></div>' +
+      '<button data-go="voices">fix it on the voices tab</button></div>';
+  }
+  h += '<div class="field"><div class="lab"><label>Voice</label>' +
+    '<span class="src" data-open="' + esc(f.profile || "") + '">' +
+    esc(srcOf(SET.voice, f).text) + '</span></div>' +
+    '<p class="help">Every Edge TTS voice has a play button on the voices tab, so ' +
+    'you can hear one before you pick it. Choosing there writes the language line too.</p>' +
+    '<div class="row"><input type="text" value="' + esc(SET.voice.value || "not set") +
+    '" readonly style="font-family:var(--mono);font-weight:600">' +
+    '<button data-go="voices" class="save go" style="visibility:visible">choose a voice</button>' +
+    '</div></div>';
+  h += '<div class="field"><div class="lab"><label>The language it answers in</label>' +
+    '<span class="src' + (lang.mismatch ? " inherit" : "") + '" data-open="' +
+    esc(f.profile || "") + '">derived from the voice</span></div>' +
+    '<p class="help">Speech recognition understands whatever you say. This decides ' +
+    'what comes back. It is locked because it only ever makes sense as the voice\'s own ' +
+    'language.</p><div class="row"><input type="text" readonly value="' +
+    esc(lang.value || "not set") + '"></div></div>';
+  h += "</section>";
+
+  /* ----------------------------------------------------- what it can do */
+  // Count what the page is actually showing. The live list from the log only
+  // has the cat's own tools in it while a cat is connected, and a count that
+  // drops from fourteen to four when it hangs up reads as something breaking.
+  const bodyCount = (SET.device_tools || []).length;
+  const serverCount = (A.functions || []).filter(n => !n.startsWith("self_")).length;
+  h += sec("abilities", "blue", "What it can do",
+    "Three different things wearing the same word. The cat's own body is fixed " +
+    "in firmware. MCP servers and the bundled plugins are yours to switch.",
+    (bodyCount + serverCount) + " it can call");
+
+  h += '<h3 class="sub">MCP servers<span class="tail">' +
+    'the real way to give it a new ability</span></h3>';
+  const mcp = SET.mcp || [];
+  if (!mcp.length) {
+    h += '<p class="help">This profile lists none, so everything the cat can do ' +
+      'comes from its own body. Add one to <span class="mono">' + esc(f.mcp) +
+      '</span> and it appears here.</p>';
+  } else {
+    h += mcp.map(m => {
+      const seen = (A.servers || []).find(s => s.name === m.name) || {};
+      const up = seen.state === "connected";
+      const stateCls = !m.on ? "" : up ? "up" : live ? "down" : "";
+      const stateTxt = !m.on ? "switched off" : up ? "connected"
+        : live ? "not connected" : "starts with the next conversation";
+      return '<div class="tog' + (m.on ? " on" : "") + '" data-mcp="' + esc(m.name) + '">' +
+        '<button class="sw" aria-label="turn ' + esc(m.name) + (m.on ? " off" : " on") + '"></button>' +
+        '<div class="body"><div class="n">' + esc(m.name) + '</div>' +
+        '<div class="why mono">' + esc(m.target) + '</div>' +
+        ((m.on && seen.tools && seen.tools.length)
+          ? '<div class="why">gives it ' + seen.tools.map(esc).join(", ") + '</div>' : '') +
+        '</div>' +
+        '<span class="tag">' + esc(m.transport) + '</span>' +
+        '<span class="state ' + stateCls + '">' + esc(stateTxt) + '</span></div>';
+    }).join("");
+  }
+
+  h += '<h3 class="sub">Bundled plugins<span class="tail">' +
+    'in the image, off for a reason</span></h3>';
+  h += '<p class="help">Turning one on tells the model it can do something it will ' +
+    'then fail at out loud, mid-sentence. The reason next to each is read out of ' +
+    'the comment in base.yaml.</p>';
+  h += (SET.plugins || []).map(p =>
+    '<div class="tog' + (p.on ? " on" : "") + '" data-plugin="' + esc(p.name) + '">' +
+    '<button class="sw" aria-label="turn ' + esc(p.name) + (p.on ? " off" : " on") + '"></button>' +
+    '<div class="body"><div class="n">' + esc(p.name) + '</div>' +
+    '<div class="why">' + esc(p.reason) + '</div></div></div>').join("");
+
+  h += '<h3 class="sub">The cat\'s own body<span class="tail">' +
+    'firmware, nothing here configures it</span></h3>';
+  const dev = SET.device_tools || [];
+  if (!dev.length) {
+    h += '<p class="help">The list only appears once a cat connects, real or fake. ' +
+      'Send anything from the test box at the bottom of the window and it fills in.</p>';
+  } else {
+    h += dev.map(t => '<div class="tool"><span class="n">' + esc(t.name) + '</span>' +
+      '<span class="d">' + esc(t.doc || "no description from the firmware") + '</span>' +
+      '</div>').join("");
+  }
+  const hidden = SET.user_tools || [];
+  h += '<h3 class="sub">Hidden from the model<span class="tail">' +
+    'firmware tools only this side can call</span></h3>';
+  if (!hidden.length) {
+    h += '<p class="help">The cat holds a second set of tools it does not offer ' +
+      'the model, and it only lists them when something asks for them by name. ' +
+      'Two of them would put your own artwork on its screen over wifi. Wake the ' +
+      'cat and run <span class="mono">python3 tools/probe_screen.py</span> to find ' +
+      'out whether this firmware has them, and they appear here.</p>';
+  } else {
+    h += hidden.map(t => '<div class="tool"><span class="n">' + esc(t.name) +
+      '</span><span class="d">' + esc(t.doc) + '</span>' +
+      '<span class="tag">user only</span></div>').join("");
+  }
+
+  const builtin = (A.functions || []).filter(n => !n.startsWith("self_"));
+  if (builtin.length) {
+    h += '<h3 class="sub">Also callable<span class="tail">' +
+      'from the server and its MCP servers</span></h3>';
+    const mcpTools = new Set();
+    for (const s of (A.servers || [])) for (const t of (s.tools || [])) mcpTools.add(t);
+    h += builtin.map(n => '<div class="tool ' + (mcpTools.has(n) ? "mcp" : "builtin") +
+      '"><span class="n">' + esc(n) + '</span>' +
+      '<span class="d">' + esc((A.docs || {})[n] || "") + '</span>' +
+      '<span class="tag">' + (mcpTools.has(n) ? "from mcp" : "built in") + '</span></div>').join("");
+  }
+  h += "</section>";
+
+  /* ------------------------------------------------------ how it listens */
+  h += sec("talking", "amber", "How it listens",
+    'Your cat wakes on <b class="mono" style="color:var(--amber)">你好小智</b>, ' +
+    'which its firmware decides and nothing here changes. Everything below is ' +
+    'what the server does in the second after that.');
+  h += chipsField("wake_words", "Phrases the server treats as a greeting",
+    "These are not the wake word, and putting a phrase here does not teach the " +
+    "cat to wake on it. When the firmware wakes it tells the server which phrase " +
+    "it heard, and the server checks that against this list to tell a greeting " +
+    "apart from a real question. Only phrases the firmware can actually detect " +
+    "ever arrive, so in practice this list needs " +
+    "<span class=\"mono\">你好小智</span> and the substitute " +
+    "<span class=\"mono\">嗨你好呀</span> the server sends in its place. " +
+    "Take them out and the wake word reaches the model as an ordinary question.",
+    SET.wake_words, f);
+  h += chipsField("exit_commands", "Phrases that end the conversation",
+    "Said out loud, these close the socket. The model can also end it itself by " +
+    "calling <span class=\"mono\">handle_exit_intent</span>, which is why " +
+    "\"close the connection\" works in English even though this list is Chinese.",
+    SET.exit_commands, f);
+  h += field({
+    id: "idle", label: "Hang up after this much silence",
+    help: "Seconds. The cat drops the socket after this and reopens it on the next " +
+      "wake word, which is why the status bar says idle rather than connected most " +
+      "of the time.",
+    src: srcOf(SET.idle, f),
+    control: '<input type="number" id="in-idle" min="15" max="3600" value="' +
+      esc(SET.idle.value) + '">',
+  });
+  h += '<h3 class="sub">The greeting<span class="tail">' +
+    'why an English cat still says hello in Mandarin</span></h3>';
+  h += '<div class="tog' + (SET.greeting.value ? " on" : "") + '" data-greet="1">' +
+    '<button class="sw" aria-label="speak when woken"></button>' +
+    '<div class="body"><div class="n">Speak when woken</div>' +
+    '<div class="why">On, it says something the moment it wakes, before you have ' +
+    'asked anything. Off, it wakes and just listens, which is quicker to talk to ' +
+    'and skips the Chinese line altogether.</div></div></div>';
+  h += '<div class="tog' + (SET.greet_reply.value ? " on" : "") + '" data-greetreply="1"' +
+    (SET.greeting.value ? "" : ' style="opacity:.45"') + '>' +
+    '<button class="sw" aria-label="canned greeting"' +
+    (SET.greeting.value ? "" : " disabled") + '></button>' +
+    '<div class="body"><div class="n">Use the ' + "image's" + ' canned greeting</div>' +
+    '<div class="why">On, it plays one of nine fixed Chinese lines no matter what ' +
+    'language the profile speaks. Off, the wake word goes to the model instead and ' +
+    'it greets you in the ' + "profile's" + ' own language, at the cost of a second or two ' +
+    'while that is generated.' +
+    (SET.greeting.value ? "" : ' Nothing to decide while Speak when woken is off.') +
+    '</div></div></div>';
+  h += "</section>";
+
+  /* ------------------------------------------- what it says on its own */
+  const R = SET.rituals || {};
+  const rlist = R.list || [];
+  const dmn = R.daemon || {};
+  h += sec("rituals", "violet", "What it says on its own",
+    "Scheduled prompts the rituals daemon speaks through the push bridge. " +
+    'It rereads <span class="mono">config/rituals.yaml</span> twice a minute, ' +
+    "so an edit here is live within a minute and needs no rebuild.",
+    rlist.length
+      ? rlist.filter(x => x.enabled).length + " of " + rlist.length + " on"
+      : null);
+  if (dmn.running) {
+    h += '<p class="help">' + dot("on") + "The daemon is running. Its last " +
+      "heartbeat was " + esc(ago(dmn.age)) + " and it checks the clock every " +
+      esc(dmn.poll) + " seconds.</p>";
+  } else {
+    h += '<p class="help" style="color:var(--warn)">' + dot("warn") +
+      "The daemon is not running, so none of this will be spoken. Start it " +
+      'with <span class="mono">.\\cat.ps1 rituals</span>.</p>';
+  }
+  if (!rlist.length) {
+    h += '<p class="help">No rituals are defined in ' +
+      '<span class="mono">config/rituals.yaml</span>.</p>';
+  } else {
+    h += '<div class="field"><div class="lab"><label>The schedule</label>' +
+      '<span class="src" data-open="config/rituals.yaml">rituals.yaml</span></div>' +
+      '<p class="help">Times are this machine\'s local clock, and a ritual ' +
+      "fires within about thirty seconds of its time. If no cat is connected " +
+      "the daemon retries for a while, then records the miss in the ledger.</p>" +
+      rlist.map(r =>
+        '<div class="tog' + (r.enabled ? " on" : "") + '" data-ritual="' +
+        esc(r.name) + '">' +
+        '<button class="sw" aria-label="turn ' + esc(r.name) +
+        (r.enabled ? " off" : " on") + '"></button>' +
+        '<div class="body"><div class="n">' + esc(r.name) + "</div>" +
+        (r.what ? '<div class="why">' + esc(r.what) + "</div>" : "") + "</div>" +
+        '<input type="text" class="rtime" value="' + esc(r.time) +
+        '" maxlength="5" aria-label="time ' + esc(r.name) + ' fires">' +
+        '<button class="rsave go">save</button></div>').join("") +
+      '<div class="fmsg" data-msg="rituals"></div></div>';
+  }
+  h += "</section>";
+
+  /* -------------------------------------------------------------- brain */
+  h += sec("brain", "teal", "What thinks for it",
+    "One key does speech recognition and answers. The key itself is in .env, " +
+    "which this page will not open.");
+  h += field({
+    id: "model", label: "Model",
+    help: "A bigger model holds a persona better and costs more per sentence. " +
+      "Anything not listed can be typed into profile.yaml directly.",
+    src: srcOf(SET.model, f),
+    control: '<select id="in-model">' + (SET.model.options || []).map(o =>
+      '<option value="' + esc(o[0]) + '"' + (o[0] === SET.model.value ? " selected" : "") +
+      '>' + esc(o[0]) + ' — ' + esc(o[1]) + '</option>').join("") + '</select>',
+  });
+  h += "</section>";
+
+  /* -------------------------------------------------------------- walls */
+  h += sec("walls", "rose", "Not settable here",
+    "Things people look for on this page and will not find, with where they " +
+    "actually live. An absent setting looks exactly like one you have not found yet.");
+  h += (SET.walls || []).map(w =>
+    '<div class="wall"><div><div class="w">' + esc(w.what) + '</div>' +
+    '<div class="where">' + esc(w.where) + '</div></div>' +
+    '<div class="why">' + esc(w.why) + '</div>' +
+    (w.value ? '<div class="val">right now it says: ' + esc(w.value) + '</div>' : '') +
+    '</div>').join("");
+  h += "</section>";
+
+  $("#catbody").innerHTML = h;
+  wireCat();
+}
+
+function sec(id, hue, title, lede, count, tail) {
+  return '<section class="sec" id="sec-' + id + '" data-hue="' + hue + '">' +
+    '<h2><span class="bar"></span>' + esc(title) +
+    (count ? '<span class="count">' + esc(count) + '</span>' : '') +
+    (tail ? '<span class="htail">' + tail + '</span>' : '') + '</h2>' +
+    '<p class="lede">' + lede + '</p><div class="rule"></div>';
+}
+
+function chipsField(id, label, help, node, files) {
+  const items = (node && node.value) || [];
+  return '<div class="field" data-f="' + esc(id) + '">' +
+    '<div class="lab"><label>' + esc(label) + '</label>' +
+    '<span class="src' + (node.source === "image" ? " inherit" : "") + '" data-open="' +
+    esc(node.source === "image" ? "" : files.base) + '">' +
+    esc(srcOf(node, files).text) + '</span></div>' +
+    '<p class="help">' + help + '</p>' +
+    '<div class="chips" data-chips="' + esc(id) + '">' +
+    items.map((t, i) => '<span class="c">' + esc(t) +
+      '<button data-rm="' + i + '" title="remove">&times;</button></span>').join("") +
+    '<input type="text" data-add="' + esc(id) + '" placeholder="add one, then enter">' +
+    '</div><div class="fmsg" data-msg="' + esc(id) + '"></div></div>';
+}
+
+function wireCat() {
+  $$("#catbody [data-go=voices]").forEach(b => { b.onclick = () => show("voices"); });
+  $$("#catbody .src[data-open]").forEach(b => {
+    if (!b.dataset.open) return;
+    b.title = "open " + b.dataset.open;
+    b.onclick = () => openFileByPath(b.dataset.open);
+  });
+
+  const watch = (inputId, fieldId) => {
+    const el = $("#" + inputId);
+    if (!el) return;
+    const start = el.value;
+    el.addEventListener("input", () => {
+      el.closest(".field").classList.toggle("dirty", el.value !== start);
+    });
+  };
+  ["persona", "description", "idle", "model"].forEach(k => watch("in-" + k, k));
+  $("#in-model") && ($("#in-model").onchange = () =>
+    $("#in-model").closest(".field").classList.add("dirty"));
+
+  $$("#catbody [data-save]").forEach(b => {
+    b.onclick = () => saveField(b.dataset.save);
+  });
+
+  $("#switchprofile") && ($("#switchprofile").onclick = () => {
+    const name = $("#in-profile").value;
+    if (name === SET.profile) { fmsg("profile", "that one is already built", true); return; }
+    doRebuild(name);
+  });
+
+  $$("#catbody .tog[data-plugin]").forEach(row => {
+    row.querySelector(".sw").onclick = () =>
+      post("plugin", { name: row.dataset.plugin, on: !row.classList.contains("on") });
+  });
+  $$("#catbody .tog[data-mcp]").forEach(row => {
+    row.querySelector(".sw").onclick = () =>
+      post("mcp", { name: row.dataset.mcp, on: !row.classList.contains("on") });
+  });
+  $$("#catbody .tog[data-greet]").forEach(row => {
+    row.querySelector(".sw").onclick = () =>
+      post("greeting", !row.classList.contains("on"));
+  });
+  $$("#catbody .tog[data-greetreply]").forEach(row => {
+    const sw = row.querySelector(".sw");
+    if (sw.disabled) return;
+    sw.onclick = () => post("greet_reply", !row.classList.contains("on"));
+  });
+  $$("#catbody .tog[data-ritual]").forEach(row => {
+    const name = row.dataset.ritual;
+    row.querySelector(".sw").onclick = () =>
+      postRitual("ritual_enabled", { name, on: !row.classList.contains("on") });
+    const t = row.querySelector(".rtime");
+    const startTime = t.value;
+    t.addEventListener("input", () =>
+      row.classList.toggle("rdirty", t.value !== startTime));
+    const save = row.querySelector(".rsave");
+    save.onclick = () => postRitual("ritual_time", { name, time: t.value.trim() });
+    t.onkeydown = ev => { if (ev.key === "Enter") save.click(); };
+  });
+
+  $$("#catbody .chips").forEach(box => {
+    const id = box.dataset.chips;
+    const current = () => Array.from(box.querySelectorAll(".c"))
+      .map(c => c.firstChild.textContent);
+    box.querySelectorAll("[data-rm]").forEach(b => {
+      b.onclick = () => {
+        const items = current();
+        items.splice(+b.dataset.rm, 1);
+        post(id, items);
+      };
+    });
+    const add = box.querySelector("[data-add]");
+    add.onkeydown = ev => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      const t = add.value.trim();
+      if (!t) return;
+      post(id, current().concat([t]));
+    };
+  });
+
+  // keep the section nav in step with the scroll position
+  const body = $("#catbody");
+  body.onscroll = () => {
+    // The first section whose bottom is still on screen, so a heading scrolled
+    // just past the top edge does not hand the highlight back to the one above.
+    let cur = SECTIONS[SECTIONS.length - 1].id;
+    for (const s of SECTIONS) {
+      const el = document.getElementById("sec-" + s.id);
+      if (el && el.offsetTop + el.offsetHeight > body.scrollTop + 80) {
+        cur = s.id;
+        break;
+      }
+    }
+    $$("#secnav a").forEach(a => a.classList.toggle("on", a.dataset.go === "sec-" + cur));
+  };
+  body.onscroll();
+}
+
+function fmsg(id, text, ok) {
+  const el = $('#catbody [data-msg="' + id + '"]');
+  if (!el) return;
+  el.textContent = text;
+  el.className = "fmsg show " + (ok ? "ok" : "bad");
+  if (ok) setTimeout(() => { el.className = "fmsg"; }, 4000);
+}
+
+async function saveField(id) {
+  const el = $("#in-" + id);
+  if (!el) return;
+  let value = el.value;
+  if (id === "idle") value = parseInt(value, 10);
+  await post(id, value);
+}
+
+/* Ritual edits skip the rebuild machinery on purpose: the daemon rereads
+   config/rituals.yaml on its own, so nothing about the container changes. */
+async function postRitual(field, value) {
+  let d;
+  try {
+    d = await (await fetch("/api/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ field, value })
+    })).json();
+  } catch (e) { d = { error: "the dashboard server did not answer" }; }
+  if (d.error) { fmsg("rituals", d.error, false); return; }
+  await loadSettings();  // rerenders the section, so the message comes after
+  fmsg("rituals", "written to " + d.file +
+    ", the daemon picks it up within a minute", true);
+}
+
+async function post(field, value) {
+  let d;
+  try {
+    d = await (await fetch("/api/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ field, value })
+    })).json();
+  } catch (e) { d = { error: "the dashboard server did not answer" }; }
+  if (d.error) { fmsg(field, d.error, false); return false; }
+  snoozed = false;
+  fmsg(field, "written to " + d.file + ", live after a rebuild", true);
+  seedTest(field);
+  await loadSettings();
+  return true;
+}
+
+/* ================================================================= voices */
+let voices = [], current = "", currentLang = "", player = new Audio();
+
+const SAMPLES = {
+  "Mandarin Chinese": "你好，我是你的小猫。今天想聊点什么呢？",
+  "Cantonese": "你好，我係你嘅貓仔。今日想傾啲咩呀？",
+  "Traditional Chinese": "你好，我是你的小貓。今天想聊點什麼呢？",
+  "English": "Hello, I am your desk cat. What would you like to talk about?",
+  "Japanese": "こんにちは、机の上の猫です。今日は何を話しましょうか。",
+  "Korean": "안녕하세요, 저는 책상 위의 고양이예요. 오늘은 무슨 이야기를 할까요?",
+};
+const DEFAULT_SAMPLE = SAMPLES.English;
+function sampleFor(lang) { return SAMPLES[lang] || DEFAULT_SAMPLE; }
+$("#sample").value = DEFAULT_SAMPLE;
 
 async function loadVoices() {
-  const r = await fetch("/api/voices");
-  const d = await r.json();
+  let d;
+  try { d = await (await fetch("/api/voices")).json(); } catch (e) { return; }
   voices = d.voices || [];
   current = d.current || "";
   currentLang = d.language || "";
-  $("#curvoice").innerHTML = d.error
-    ? '<span style="color:var(--err)">' + esc(d.error) + '</span>'
-    : "built profile " + esc(d.profile || "none") + " speaks as " +
-      esc(current) + " in " + esc(currentLang);
+  const box = $("#curvoice");
+  if (d.error) {
+    box.className = "nowvoice bad";
+    $("#curname").textContent = "voices are unavailable";
+    $("#cursub").textContent = d.error;
+  } else {
+    box.className = "nowvoice";
+    $("#curname").textContent = current || "not set";
+    const cur = voices.find(v => v.name === current);
+    const should = cur ? cur.language : "";
+    const off = should && currentLang && should !== currentLang;
+    box.className = "nowvoice" + (off ? " bad" : "");
+    $("#cursub").innerHTML = off
+      ? 'is a <b>' + esc(should) + '</b> voice but the profile tells the model to ' +
+        'write in <b>' + esc(currentLang) + '</b>. Pick it again below to write both ' +
+        'lines together.'
+      : esc("writing in " + (currentLang || "no language") +
+          (cur && cur.note ? ", " + cur.note : "") +
+          ", from the profile " + (d.profile || "none"));
+    if (cur) setSample(cur.language);
+  }
   const langs = [...new Set(voices.map(v => v.language))].sort();
+  const keep = $("#vlang").value;
   $("#vlang").innerHTML = '<option value="">any language</option>' +
-    langs.map(l => '<option' + (l === "Chinese" || l === "English" ? "" : "") + '>' +
-      esc(l) + '</option>').join("");
+    langs.map(l => '<option' + (l === keep ? " selected" : "") + '>' + esc(l) + '</option>').join("");
   renderVoices();
+}
+
+let sampleTouched = false;
+$("#sample").addEventListener("input", () => { sampleTouched = true; });
+function setSample(lang) {
+  if (sampleTouched) return;
+  $("#sample").value = sampleFor(lang);
 }
 
 function renderVoices() {
   const lang = $("#vlang").value, g = $("#vgender").value;
   const q = $("#vsearch").value.trim().toLowerCase();
+  if (lang) setSample(lang);
   const list = voices.filter(v =>
-    (!lang || v.language === lang) &&
-    (!g || v.gender === g) &&
-    (!q || v.name.toLowerCase().includes(q)));
+    (!lang || v.language === lang) && (!g || v.gender === g) &&
+    (!q || v.name.toLowerCase().includes(q)))
+    .sort((a, b) => (b.name === current) - (a.name === current) ||
+                    a.language.localeCompare(b.language) ||
+                    a.name.localeCompare(b.name));
   $("#vcount").textContent = list.length + " of " + voices.length + " voices";
+  if (!list.length) {
+    $("#vlist").innerHTML = '<div class="empty"><b>No voice matches those filters.</b>' +
+      'Widen the language or gender, or clear the search box.</div>';
+    return;
+  }
   $("#vlist").innerHTML = list.map(v =>
-    '<div class="v' + (v.name === current ? " cur" : "") + '" data-v="' + esc(v.name) + '">' +
-    '<button class="play" title="play a sample">&#9654;</button>' +
-    '<span class="nm">' + esc(v.name) + '<small>' + esc(v.language) + '</small></span>' +
-    '<span class="g">' + esc(v.gender.toLowerCase()) + '</span>' +
+    '<div class="voice' + (v.name === current ? " cur" : "") + '" data-v="' + esc(v.name) +
+    '" data-l="' + esc(v.language) + '">' +
+    '<button class="play" title="play a sample of ' + esc(v.name) + '"' +
+    ' aria-label="play a sample of ' + esc(v.name) + '">&#9654;</button>' +
+    '<span class="who"><span class="nm">' + esc(v.name) + '</span>' +
+    '<span class="lang">' + esc(v.language) + (v.note ? ", " + esc(v.note) : "") +
+    ' &middot; ' + esc(v.gender.toLowerCase()) + '</span></span>' +
     '<button class="use">' + (v.name === current ? "in use" : "use") + '</button>' +
     '</div>').join("");
-  $("#vlist").querySelectorAll(".v").forEach(row => {
+  $$("#vlist .voice").forEach(row => {
     row.querySelector(".play").onclick = () => playVoice(row);
     const use = row.querySelector(".use");
     use.disabled = row.dataset.v === current;
@@ -663,22 +1953,21 @@ function renderVoices() {
 
 async function playVoice(row) {
   const btn = row.querySelector(".play");
+  setSample(row.dataset.l);
   const text = $("#sample").value.trim();
   if (!text) return;
   btn.textContent = "…";
   player.pause();
-  const url = "/api/tts?voice=" + encodeURIComponent(row.dataset.v) +
-    "&text=" + encodeURIComponent(text);
   try {
-    const r = await fetch(url);
+    const r = await fetch("/api/tts?voice=" + encodeURIComponent(row.dataset.v) +
+      "&text=" + encodeURIComponent(text));
     if (!r.ok) {
       const d = await r.json().catch(() => ({ error: "synthesis failed" }));
       btn.textContent = "!"; btn.title = d.error || "failed";
       setTimeout(() => { btn.innerHTML = "&#9654;"; }, 2500);
       return;
     }
-    const blob = await r.blob();
-    player = new Audio(URL.createObjectURL(blob));
+    player = new Audio(URL.createObjectURL(await r.blob()));
     player.onended = () => { btn.innerHTML = "&#9654;"; };
     await player.play();
     btn.textContent = "■";
@@ -691,43 +1980,467 @@ async function playVoice(row) {
 async function useVoice(name, btn) {
   btn.disabled = true;
   btn.textContent = "…";
-  const r = await fetch("/api/voice", {
+  const d = await (await fetch("/api/voice", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ voice: name })
-  });
-  const d = await r.json();
-  if (d.error) {
-    btn.textContent = "!"; btn.title = d.error; btn.disabled = false;
-    return;
-  }
+  })).json();
+  if (d.error) { btn.textContent = "!"; btn.title = d.error; btn.disabled = false; return; }
   current = d.voice; currentLang = d.language;
-  $("#curvoice").innerHTML = "wrote voice " + esc(d.voice) + " and language " +
-    esc(d.language) + " into " + esc(d.file) +
-    '. <span style="color:var(--warn)">Rebuild on the config tab to make it live.</span>';
+  $("#curname").textContent = current;
+  $("#cursub").textContent = "written into " + d.file + " with language " +
+    d.language + ", live after a rebuild";
+  $("#nowvoicetop").textContent = current;
+  snoozed = false;
+  sampleTouched = false;
   renderVoices();
+  loadSettings();
+  seedTest("voice");
 }
-
 $("#vlang").onchange = renderVoices;
 $("#vgender").onchange = renderVoices;
 $("#vsearch").oninput = renderVoices;
 
-/* -------------------------------------------------------------------- tabs */
-document.querySelectorAll(".tabs button").forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll(".tabs button").forEach(x => x.classList.remove("on"));
-    document.querySelectorAll(".pane").forEach(x => x.classList.remove("on"));
-    b.classList.add("on");
-    $("#pane-" + b.dataset.tab).classList.add("on");
-  };
+/* ============================================================== progress */
+let PROG = null;
+
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun",
+                "Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtDay(day) {
+  const p = String(day || "").split("-");
+  if (p.length < 3) return day || "";
+  return MONTHS[(+p[1]) - 1] + " " + (+p[2]);
+}
+
+async function loadProgress() {
+  let d;
+  try { d = await (await fetch("/api/progress")).json(); } catch (e) { return; }
+  PROG = d;
+  renderProgress();
+}
+
+function niceStep(span, target) {
+  for (const s of [0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10, 20, 50]) {
+    if (span / s <= target) return s;
+  }
+  return 100;
+}
+
+/* One series, one hue, so there is no legend: the section title names the
+   line. Values are reachable three ways: the label on the newest point, the
+   crosshair tooltip, and the table underneath, so nothing is hover-only. */
+function weightChartSvg(ws) {
+  const W = 860, H = 250, L = 52, R = 84, T = 16, B = 30;
+  const xs = ws.map(w => Date.parse(w.ts.replace(" ", "T")));
+  let x0 = Math.min(...xs), x1 = Math.max(...xs);
+  if (x1 - x0 < 3600 * 1000) { x0 -= 43200000; x1 += 43200000; }
+  const kgs = ws.map(w => w.kg);
+  let lo = Math.min(...kgs), hi = Math.max(...kgs);
+  if (hi - lo < 1) { const mid = (hi + lo) / 2; lo = mid - 0.5; hi = mid + 0.5; }
+  const step = niceStep(hi - lo, 4);
+  const y0 = Math.floor(lo / step) * step - step / 2;
+  const y1 = Math.ceil(hi / step) * step + step / 2;
+  const X = t => L + (t - x0) / (x1 - x0) * (W - L - R);
+  const Y = v => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+
+  let g = "";
+  const t0 = Math.ceil(y0 / step) * step;
+  for (let v = t0; v <= y1 + 1e-9; v += step) {
+    const y = Y(v);
+    g += '<line x1="' + L + '" y1="' + y + '" x2="' + (W - R) + '" y2="' + y +
+      '" stroke="var(--line)" stroke-width="1"></line>' +
+      '<text x="' + (L - 8) + '" y="' + (y + 3.5) +
+      '" text-anchor="end" fill="var(--dim)" font-size="11"' +
+      ' font-family="var(--mono)">' + (Math.round(v * 10) / 10) + '</text>';
+  }
+  const days = [...new Set(ws.map(w => w.day))];
+  const marks = days.length > 2
+    ? [days[0], days[Math.floor(days.length / 2)], days[days.length - 1]]
+    : days;
+  for (const day of marks) {
+    const i = ws.findIndex(w => w.day === day);
+    const x = Math.max(L + 18, Math.min(W - R - 4, X(xs[i])));
+    g += '<text x="' + x + '" y="' + (H - 8) + '" text-anchor="middle"' +
+      ' fill="var(--dim)" font-size="11" font-family="var(--mono)">' +
+      esc(fmtDay(day)) + '</text>';
+  }
+  const pts = ws.map((w, i) => X(xs[i]) + "," + Y(w.kg));
+  g += '<polygon points="' + pts.join(" ") + " " +
+    X(xs[xs.length - 1]) + "," + Y(y0) + " " + X(xs[0]) + "," + Y(y0) +
+    '" fill="rgba(0,102,204,.08)"></polygon>';
+  g += '<polyline points="' + pts.join(" ") +
+    '" fill="none" stroke="var(--blue)" stroke-width="2"' +
+    ' stroke-linejoin="round" stroke-linecap="round"></polyline>';
+  g += '<line id="wcross" x1="0" y1="' + T + '" x2="0" y2="' + (H - B) +
+    '" stroke="var(--line3)" stroke-width="1" style="display:none"></line>';
+  ws.forEach((w, i) => {
+    g += '<circle cx="' + X(xs[i]) + '" cy="' + Y(w.kg) +
+      '" r="4.5" fill="var(--blue)" stroke="#ffffff" stroke-width="2"' +
+      ' data-i="' + i + '"></circle>';
+  });
+  const last = ws[ws.length - 1];
+  g += '<text x="' + (X(xs[xs.length - 1]) + 10) + '" y="' +
+    (Y(last.kg) + 4) + '" fill="var(--fg)" font-size="12"' +
+    ' font-family="var(--mono)">' + last.kg + ' kg</text>';
+  return '<svg viewBox="0 0 ' + W + " " + H + '" role="img"' +
+    ' aria-label="weight in kilograms over time">' + g + "</svg>";
+}
+
+function wireWeightChart(ws) {
+  const wrap = $("#wchart");
+  if (!wrap) return;
+  const svg = wrap.querySelector("svg");
+  const tip = $("#wtip");
+  const cross = svg.querySelector("#wcross");
+  const dots = Array.from(svg.querySelectorAll("circle[data-i]"));
+  svg.addEventListener("pointermove", ev => {
+    const rect = svg.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) / rect.width * 860;
+    let best = null, bestDist = Infinity;
+    for (const d of dots) {
+      const dist = Math.abs(+d.getAttribute("cx") - px);
+      if (dist < bestDist) { bestDist = dist; best = d; }
+    }
+    if (!best) return;
+    const w = ws[+best.dataset.i];
+    const cx = +best.getAttribute("cx"), cy = +best.getAttribute("cy");
+    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx);
+    cross.style.display = "block";
+    tip.innerHTML = "<b>" + esc(w.kg) + " kg</b> <span>" +
+      esc(fmtDay(w.day)) + "</span>";
+    tip.style.display = "block";
+    const tx = cx / 860 * rect.width, ty = cy / 250 * rect.height;
+    tip.style.left = Math.min(rect.width - 130, Math.max(0, tx + 12)) + "px";
+    tip.style.top = Math.max(0, ty - 38) + "px";
+  });
+  svg.addEventListener("pointerleave", () => {
+    cross.style.display = "none";
+    tip.style.display = "none";
+  });
+}
+
+function renderProgress() {
+  const el = $("#progbody");
+  if (!PROG) return;
+  if (PROG.error) {
+    el.innerHTML = '<div class="empty"><b>The ledger could not be read.</b>' +
+      esc(PROG.error) + "</div>";
+    return;
+  }
+  if (!PROG.exists) {
+    el.innerHTML = '<div class="empty"><b>The ledger has not started yet.</b>' +
+      "It begins with the first thing you tell the cat to keep: a plan for " +
+      "the day, a weight, an idea, or a focus block. Everything is written " +
+      'to <span class="mono">data/companion.db</span> and this tab reads it back.</div>';
+    return;
+  }
+  /* ------------------------------------------------- the numbers up front */
+  const rate = PROG.rate30;
+  const days = PROG.days || [];
+  const ws = PROG.weights || [];
+  const blocks = PROG.focus || [];
+  const ideas = PROG.ideas || [];
+  const val = v => '<span class="v">' + esc(v) + "</span>";
+
+  let trend = "";
+  if (ws.length > 1) {
+    const last = ws[ws.length - 1];
+    const c = new Date(Date.parse(last.day + "T00:00:00") - 13 * 86400000);
+    const pad = n => String(n).padStart(2, "0");
+    const cutStr = c.getFullYear() + "-" + pad(c.getMonth() + 1) + "-" + pad(c.getDate());
+    const base = ws.find(w => w.day >= cutStr) || ws[0];
+    const dkg = Math.round((last.kg - base.kg) * 10) / 10;
+    trend = Math.abs(dkg) < 0.05 ? "steady over 14 days"
+      : (dkg < 0 ? "down " + Math.abs(dkg) : "up " + dkg) + " kg over 14 days";
+  }
+  const doneN = blocks.filter(b => !b.open && b.completed).length;
+
+  const daysTail = rate
+    ? val(Math.round(rate.avg * 100) + "%") + " avg over 30 days, " +
+      val(days.length) + (days.length === 1 ? " day" : " days") + " on record"
+    : days.length
+      ? val(days.length) + (days.length === 1 ? " day" : " days") +
+        " on record, no outcomes yet"
+      : "nothing logged yet";
+  const wTail = !ws.length ? "no readings yet"
+    : ws.length === 1 ? val(ws[0].kg + " kg") + " on " + esc(fmtDay(ws[0].day))
+    : val(ws[ws.length - 1].kg + " kg") + " latest, " + esc(trend);
+  const fTail = !blocks.length ? "none yet"
+    : val(blocks.length) + (blocks.length === 1 ? " block, " : " blocks, ") +
+      val(doneN) + " finished";
+  const iTail = !ideas.length ? "none yet"
+    : val(ideas.length) + " kept, newest " + esc(fmtDay(ideas[0].day));
+
+  /* The overview: the same prose style as the status paragraph, one clause
+     per section, each a smooth scroll to its section below. */
+  const link = (id, hue, html) =>
+    '<a class="cl" data-jump="sec-prog-' + id + '">' + html + "</a>";
+  let intro = "";
+  if (rate) {
+    const word = rate.count === 1 ? "outcome" : "outcomes";
+    intro += link("days", "teal",
+      'Completion averaged <span class="bignum">' + Math.round(rate.avg * 100) +
+      "%</span> across " + val(rate.count + " logged " + word) +
+      " in the last 30 days.");
+  } else if (days.length) {
+    intro += link("days", "teal",
+      val(days.length + (days.length === 1 ? " day" : " days")) +
+      " of plans are on record, and the 30 day rate appears once the first " +
+      "outcome is logged.");
+  } else {
+    intro += link("days", "teal", "No plans or outcomes are logged yet.");
+  }
+  if (ws.length > 1) {
+    intro += " " + link("weight", "violet", "Weight is " +
+      val(ws[ws.length - 1].kg + " kg") + " as of " +
+      esc(fmtDay(ws[ws.length - 1].day)) + ", " + esc(trend) + ".");
+  } else if (ws.length === 1) {
+    intro += " " + link("weight", "violet", "Weight has one reading, " +
+      val(ws[0].kg + " kg") + " on " + esc(fmtDay(ws[0].day)) + ".");
+  } else {
+    intro += " " + link("weight", "violet", "There are no weight readings yet.");
+  }
+  if (blocks.length) {
+    intro += " " + link("focus", "blue",
+      val(blocks.length + (blocks.length === 1 ? " focus block" : " focus blocks")) +
+      (blocks.length === 1 ? " is" : " are") + " logged and " +
+      val(doneN) + (doneN === 1 ? " is" : " are") + " finished.");
+  } else {
+    intro += " " + link("focus", "blue", "There are no focus blocks yet.");
+  }
+  if (ideas.length) {
+    intro += " " + link("ideas", "amber",
+      val(ideas.length + (ideas.length === 1 ? " idea" : " ideas")) +
+      (ideas.length === 1 ? " is" : " are") + " kept, the newest from " +
+      esc(fmtDay(ideas[0].day)) + ".");
+  } else {
+    intro += " " + link("ideas", "amber", "There are no ideas yet.");
+  }
+
+  let h = '<div class="progintro"><p class="statusprose">' + intro + "</p></div>";
+
+  /* ---------------------------------------------------- plans and outcomes */
+  h += sec("prog-days", "teal", "Plans and outcomes",
+    "The morning plan next to what got done, with the completion estimate " +
+    "the model logged when you reported back.", null, daysTail);
+  if (!days.length) {
+    h += '<p class="help">Nothing here yet. Tell the cat your plan in the ' +
+      "morning and what got done in the afternoon, and each day appears " +
+      "here with its completion number.</p>";
+  } else {
+    h += days.map(d => {
+      const score = d.completion == null
+        ? '<span class="nodata">' +
+          (d.outcome ? "no estimate" : "no outcome yet") + "</span>"
+        : '<span class="num">' + Math.round(d.completion * 100) + "%</span>" +
+          '<span class="cmeter"><i style="width:' +
+          Math.round(d.completion * 100) + '%"></i></span>';
+      let txt = "";
+      if (d.plan) txt += '<div class="row"><span class="k">plan</span>' +
+        esc(d.plan) + "</div>";
+      if (d.outcome) txt += '<div class="row"><span class="k">done</span>' +
+        esc(d.outcome) + "</div>";
+      for (const m of d.missed || []) {
+        txt += '<div class="row miss"><span class="k">missed</span>' +
+          esc(m) + "</div>";
+      }
+      if (!txt) txt = '<span class="nodata">nothing logged</span>';
+      return '<div class="dayrow"><span class="d">' + esc(fmtDay(d.day)) +
+        '</span><span class="score">' + score + '</span>' +
+        '<span class="txt">' + txt + "</span></div>";
+    }).join("");
+  }
+  h += "</section>";
+
+  /* ------------------------------------------------------------- weight */
+  h += sec("prog-weight", "violet", "Weight",
+    "Every reading the cat logged, normalized to kilograms.", null, wTail);
+  if (!ws.length) {
+    h += '<p class="help">No weight readings yet. Tell the cat a weight and ' +
+      "it shows up here. The chart draws once there are two readings.</p>";
+  } else if (ws.length === 1) {
+    h += '<p class="help">One reading so far: ' + esc(ws[0].kg) + " kg on " +
+      esc(fmtDay(ws[0].day)) + ". The chart draws once there are two.</p>";
+  } else {
+    h += '<div class="chartwrap" id="wchart">' + weightChartSvg(ws) +
+      '<div class="ctip" id="wtip"></div></div>';
+  }
+  if (ws.length) {
+    h += '<table class="wtable"><tr><th>date</th><th>kg</th></tr>' +
+      ws.slice(-14).reverse().map(w =>
+        "<tr><td>" + esc(fmtDay(w.day)) + "</td><td>" + esc(w.kg) +
+        "</td></tr>").join("") + "</table>";
+  }
+  h += "</section>";
+
+  /* -------------------------------------------------------- focus blocks */
+  h += sec("prog-focus", "blue", "Focus blocks",
+    "Announced blocks of focused work and how each one ended.", null, fTail);
+  if (!blocks.length) {
+    h += '<p class="help">No focus blocks yet. Announce one to the cat with ' +
+      "the minutes and what it is for, and it is listed here with how it " +
+      "went.</p>";
+  } else {
+    h += blocks.map(b => {
+      const st = b.open ? '<span class="st running">open</span>'
+        : b.completed ? '<span class="st done">finished</span>'
+        : '<span class="st notdone">not finished</span>';
+      return '<div class="focusrow"><span class="d">' + esc(fmtDay(b.day)) +
+        " " + esc(b.ts.slice(11, 16)) + '</span>' +
+        '<span class="min">' + esc(b.minutes == null ? "?" : b.minutes) +
+        ' min</span><span class="i">' + esc(b.intent) +
+        (b.outcome ? ' <span style="color:var(--dim)">&middot; ' +
+          esc(b.outcome) + "</span>" : "") + "</span>" + st + "</div>";
+    }).join("");
+  }
+  h += "</section>";
+
+  /* --------------------------------------------------------------- ideas */
+  h += sec("prog-ideas", "amber", "Ideas",
+    "Ideas spoken out loud, newest first. The cat compares each new one " +
+    "against these and mentions the closest matches with their dates.",
+    null, iTail);
+  if (!ideas.length) {
+    h += '<p class="help">No ideas yet. Ideas you tell the cat are kept ' +
+      "here with their dates.</p>";
+  } else {
+    h += ideas.map(i =>
+      '<div class="idearow"><span class="d">' + esc(fmtDay(i.day)) +
+      '</span><span class="t">' + esc(i.text) + "</span></div>").join("");
+  }
+  h += "</section>";
+
+  el.innerHTML = h;
+  $$("#progbody [data-jump]").forEach(a => {
+    a.onclick = () => {
+      const t = document.getElementById(a.dataset.jump);
+      if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  });
+  if (ws.length > 1) wireWeightChart(ws);
+}
+
+/* ================================================================ drawer */
+function openDrawer(open) {
+  const d = $("#drawer");
+  const now = open === undefined ? !d.classList.contains("open") : open;
+  d.classList.toggle("open", now);
+  $("#dchev").innerHTML = now ? "&#9662;" : "&#9652;";
+  store.set("drawer", now ? "1" : "0");
+}
+$("#dhead").onclick = () => openDrawer();
+$("#dhead").onkeydown = ev => {
+  if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openDrawer(); }
+};
+if (store.get("drawer", "0") === "1") openDrawer(true);
+
+const SEEDS = {
+  persona: ["who are you and what do you do", "tell me about yourself in one sentence"],
+  voice: ["say something so I can hear the new voice"],
+  mcp: ["what is Claude doing right now", "which sessions are open"],
+  plugin: ["what is the weather", "search the web for something"],
+  greeting: ["你好小智"],
+  greet_reply: ["你好小智"],
+  wake_words: ["你好小智"],
+  exit_commands: ["close the connection"],
+  model: ["explain what you are, briefly"],
+  rebuild: ["who are you and what can you do"],
+};
+function seedTest(field) {
+  const list = SEEDS[field] || SEEDS.rebuild;
+  $("#seeds").innerHTML = list.map(t =>
+    '<button data-seed="' + esc(t) + '">' + esc(t) + '</button>').join("");
+  $$("#seeds button").forEach(b => {
+    b.onclick = () => { $("#talktext").value = b.dataset.seed; doTalk(); };
+  });
+  if (!$("#talktext").value) $("#talktext").value = list[0];
+  if (field) $("#dsum").textContent = "changed something? ask it and hear the difference";
+}
+
+let lastReply = "";
+async function doTalk() {
+  const text = $("#talktext").value.trim();
+  if (!text) return;
+  const btn = $("#talkgo");
+  btn.disabled = true; btn.textContent = "asking";
+  $("#talkhear").style.display = "none";
+  openDrawer(true);
+  $("#talkout").innerHTML = '<span class="rk">status</span>' +
+    '<span class="rv mono">talking to the server, this takes a few seconds</span>';
+  let d;
+  try {
+    d = await (await fetch("/api/talk", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text })
+    })).json();
+  } catch (e) { d = { error: "the dashboard server did not answer" }; }
+  btn.disabled = false; btn.textContent = "say it";
+
+  if (d.error) {
+    $("#talkout").innerHTML = '<span class="rk">no reply</span>' +
+      '<span class="rv bad">' + esc(d.error) + '</span>';
+    $("#dsum").textContent = "the last test did not get a reply";
+    return;
+  }
+  lastReply = (d.said || []).join(" ");
+  let h = '<span class="rk">it said</span><span class="rv say">' +
+    esc(lastReply || "nothing") + '</span>';
+  if (d.face) {
+    h += '<span class="rk">its face</span><span class="rv">' + esc(d.face.emoji) +
+      ' <span class="mono" style="color:var(--dim)">' + esc(d.face.emotion) + '</span></span>';
+  }
+  h += '<span class="rk">tools it called</span><span class="rv">' +
+    ((d.body || []).length
+      ? d.body.map(b => '<div class="callrow">' + esc(b.name) + ' ' +
+          esc(JSON.stringify(b.args)) + '</div>').join("")
+      : '<span class="mono" style="color:var(--dim)">none</span>') + '</span>';
+  h += '<span class="rk">speech</span><span class="rv mono">' + d.frames +
+    ' opus frames, ' + d.bytes + ' bytes, in ' + d.seconds + ' seconds</span>';
+  h += '<span class="rk">profile</span><span class="rv mono">' +
+    esc((lastStatus && lastStatus.profile) || "?") + ' speaking as ' +
+    esc((lastStatus && lastStatus.voice) || "?") + '</span>';
+  $("#talkout").innerHTML = h;
+  $("#dsum").textContent = lastReply.slice(0, 90);
+  if (lastReply) $("#talkhear").style.display = "";
+}
+$("#talkgo").onclick = doTalk;
+$("#talktext").onkeydown = ev => { if (ev.key === "Enter") doTalk(); };
+$("#talkhear").onclick = async () => {
+  const btn = $("#talkhear");
+  btn.disabled = true; btn.textContent = "…";
+  try {
+    const r = await fetch("/api/tts?voice=" +
+      encodeURIComponent((lastStatus && lastStatus.voice) || "") +
+      "&text=" + encodeURIComponent(lastReply.slice(0, 380)));
+    if (r.ok) {
+      player.pause();
+      player = new Audio(URL.createObjectURL(await r.blob()));
+      await player.play();
+    }
+  } catch (e) {}
+  btn.disabled = false;
+  btn.textContent = "hear the reply";
+  $("#talkout").insertAdjacentHTML("beforeend",
+    '<span class="rk"></span><span class="hint">Re-synthesised here with the ' +
+    'profile\'s voice. It is not the audio the cat produced, which comes back as ' +
+    'Opus frames this page does not decode.</span>');
+};
+
+/* =================================================================== boot */
+window.addEventListener("beforeunload", ev => {
+  if (dirty()) { ev.preventDefault(); ev.returnValue = ""; }
 });
 
-/* -------------------------------------------------------------------- boot */
+paintSecNav();
+show(tab);
+seedTest(null);
 pollStatus();
 openStream();
 loadConfigList();
+loadSettings();
 loadAbilities();
 loadVoices();
-setInterval(loadAbilities, 15000);
+loadProgress();
+setInterval(loadAbilities, 20000);
 </script>
 </body>
 </html>

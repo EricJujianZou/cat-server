@@ -52,6 +52,25 @@ TTS:
     # Set this to the language the profile's voice speaks.
     language: English
 
+# The rate the server encodes outgoing speech at. The image default is 24000,
+# but the cat declares 16000 in its hello (echoear-v2 firmware 2.0.4.4, visible
+# in the server log), and the server never adapts to what the device declares.
+# A mismatch here is one of the documented causes of distorted audio upstream,
+# so the two are pinned to agree. The server merges this recursively over the
+# image config, so the sibling keys keep their defaults.
+xiaozhi:
+  audio_params:
+    sample_rate: 16000
+
+# How long the server waits, in seconds of silence, before hanging up on the
+# cat. The image default is 120, which was fine when the cat only ever spoke in
+# reply, but the rituals daemon pushes speech through the bridge on 8004 and the
+# bridge can only reach a cat whose socket is still open. One day keeps the
+# socket alive as long as the cat is powered. The firmware has its own two
+# minute timer on top of this, which the keepalive in patches/push_bridge.py
+# handles.
+close_connection_no_voice_time: 86400
+
 # The bundled plugin folder is off by default and every profile should leave it
 # off unless it has a reason. All five bundled plugins are either China-only
 # services or need a key we do not have:
@@ -67,3 +86,17 @@ Intent:
   function_call:
     type: function_call
     functions: []
+
+wakeup_words:
+  - 你好小智
+  - 嘿你好呀
+  - 你好小志
+  - 小爱同学
+  - 你好小鑫
+  - 你好小新
+  - 小美同学
+  - 小龙小龙
+  - 喵喵同学
+  - 小滨小滨
+  - 小冰小冰
+  - what's up chungus
