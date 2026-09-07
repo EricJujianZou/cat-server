@@ -53,7 +53,11 @@ import settings_api               # noqa: E402
 # dashboard announces that a cat is connected when only the test rig is.
 FAKE_DEVICE_ID = "aa:bb:cc:dd:ee:ff"
 
-HOST = "127.0.0.1"
+# Bound wide so a phone on the same network can open the page. The browser on
+# this machine still gets the loopback URL. There is no login on this page,
+# which is acceptable on a home network the same way the push bridge is.
+HOST = "0.0.0.0"
+LOCAL_URL_HOST = "127.0.0.1"
 PORT = 8080
 
 # 8000 and 8003 are the server's own, 8004 is the push bridge from patches/.
@@ -814,6 +818,82 @@ def progress_payload(path=COMPANION_DB):
     }
 
 
+# ----------------------------------------------------------------- shopping
+
+# The shopping list, in its own table in the same ledger file. The voice tools
+# in tools/mcp/companion_mcp.py write it when the owner talks to the cat, and
+# this page is the second writer. Same rules as every other opener of this
+# file: no WAL, short connections.
+SHOPPING_SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS shopping ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+    "text TEXT NOT NULL, "
+    "added_at TEXT NOT NULL, "
+    "bought INTEGER NOT NULL DEFAULT 0)"
+)
+
+
+def shopping_conn():
+    conn = sqlite3.connect(COMPANION_DB, timeout=5)
+    conn.execute("PRAGMA journal_mode=DELETE")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute(SHOPPING_SCHEMA)
+    return conn
+
+
+def shopping_payload():
+    try:
+        conn = shopping_conn()
+        try:
+            rows = conn.execute(
+                "SELECT id, text, added_at, bought FROM shopping "
+                "ORDER BY bought, id").fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        return {"error": str(exc)}
+    return {"items": [
+        {"id": rid, "text": text, "added_at": ts, "bought": bool(b)}
+        for rid, text, ts, b in rows
+    ]}
+
+
+def shopping_change(body):
+    """One write per request, then the fresh list, so the page always repaints
+    from what is actually in the file rather than what it hoped happened."""
+    op = body.get("op", "")
+    try:
+        conn = shopping_conn()
+        try:
+            with conn:
+                if op == "add":
+                    text = " ".join(str(body.get("text") or "").split())
+                    if not text:
+                        return {"error": "type an item first"}
+                    if len(text) > 200:
+                        return {"error": "keep an item under 200 characters"}
+                    dup = conn.execute(
+                        "SELECT 1 FROM shopping WHERE bought=0 AND lower(text)=?",
+                        (text.lower(),)).fetchone()
+                    if not dup:
+                        conn.execute(
+                            "INSERT INTO shopping (text, added_at) VALUES (?, ?)",
+                            (text, time.strftime("%Y-%m-%d %H:%M:%S")))
+                elif op == "bought":
+                    conn.execute(
+                        "UPDATE shopping SET bought=? WHERE id=?",
+                        (1 if body.get("bought") else 0, int(body.get("id", 0))))
+                elif op == "clear":
+                    conn.execute("DELETE FROM shopping WHERE bought=1")
+                else:
+                    return {"error": "no such op"}
+        finally:
+            conn.close()
+    except (sqlite3.Error, TypeError, ValueError) as exc:
+        return {"error": str(exc)}
+    return shopping_payload()
+
+
 # ----------------------------------------------------------------- rituals
 
 # What the cat says on its own. The daemon (tools/rituals.py, started with
@@ -1307,6 +1387,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.serve_settings()
             if path == "/api/progress":
                 return self.send_json(progress_payload())
+            if path == "/api/shopping":
+                return self.send_json(shopping_payload())
             if path == "/favicon.ico":
                 # Browsers ask for this unprompted. Answering keeps a 404 out
                 # of the console of a page whose whole job is showing faults.
@@ -1328,6 +1410,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.save_setting()
             if path == "/api/talk":
                 return self.serve_talk()
+            if path == "/api/shopping":
+                return self.send_json(shopping_change(self.read_json()))
         except (BrokenPipeError, ConnectionResetError):
             return
         self.send_json({"error": "no such route"}, 404)
@@ -1610,6 +1694,20 @@ def port_free(host, port):
         s.close()
 
 
+def lan_ip():
+    """The address a phone on the same network would dial. WSL mirrored
+    networking means this is the Windows adapter's own address. No packet is
+    sent: connect() on UDP only picks the route."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
 def main():
     port = PORT
     if "--port" in sys.argv:
@@ -1617,14 +1715,17 @@ def main():
             port = int(sys.argv[sys.argv.index("--port") + 1])
         except (IndexError, ValueError):
             sys.exit("--port needs a number")
-    url = f"http://{HOST}:{port}/"
+    url = f"http://{LOCAL_URL_HOST}:{port}/"
     if not port_free(HOST, port):
-        sys.exit(f"something is already listening on {HOST}:{port}")
+        sys.exit(f"something is already listening on port {port}")
     os.makedirs(CACHE, exist_ok=True)
     LOGS.start()
     STATUS.start()
     httpd = Server((HOST, port), Handler)
     print(f"cat dashboard on {url}")
+    ip = lan_ip()
+    if ip:
+        print(f"phones on this network: http://{ip}:{port}/")
     print("ctrl-c to stop")
     if "--no-open" not in sys.argv:
         open_browser(url)

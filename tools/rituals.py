@@ -48,6 +48,26 @@ try:
 except Exception:
     pass
 
+# Started detached there is no terminal, so everything printed would vanish.
+# data/rituals.log keeps the last runs' worth of it readable after the fact.
+LOG_PATH = os.path.join(ROOT, "data", "rituals.log")
+
+
+def log_to_file():
+    if sys.stdout.isatty():
+        return
+    try:
+        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+        # One rotation, so the file never grows past a few days of ticks.
+        if os.path.exists(LOG_PATH) and os.path.getsize(LOG_PATH) > 512 * 1024:
+            os.replace(LOG_PATH, LOG_PATH + ".old")
+        f = open(LOG_PATH, "a", buffering=1, encoding="utf-8",
+                 errors="replace")
+        sys.stdout = sys.stderr = f
+        print(f"\n----- daemon started {datetime.now():%Y-%m-%d %H:%M:%S}")
+    except OSError:
+        pass
+
 SYSTEM_PROMPT = (
     "You are a small cat shaped speaker on a desk, talking out loud to your "
     "owner. Reply with only the words to say. Plain spoken English, short "
@@ -593,6 +613,8 @@ def main():
     if args.dry_run:
         dry_run(cfg, db, key, args.names)
         return
+
+    log_to_file()
 
     enabled = [n for n, r in (cfg.get("rituals") or {}).items()
                if isinstance(r, dict) and r.get("enabled", True)]

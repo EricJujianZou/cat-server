@@ -536,6 +536,20 @@ textarea.code:focus { outline:none; box-shadow:inset 3px 0 0 var(--blue); border
   flex:0 0 86px; }
 .idearow .t { flex:1; min-width:0; color:var(--ink2); font-size:12.5px; }
 
+/* ============================================================== shopping */
+.shopadd { display:flex; gap:9px; margin:0 0 14px; max-width:860px; }
+.shopadd input { flex:1; min-width:0; }
+.shopadd button { flex:0 0 auto; }
+.shoprow { display:flex; gap:13px; align-items:center; padding:10px 4px;
+  border-bottom:1px solid var(--soft); max-width:860px; }
+.shoprow input[type=checkbox] { width:18px; height:18px; margin:0;
+  accent-color:var(--blue); cursor:pointer; flex:0 0 auto; }
+.shoprow .t { flex:1; min-width:0; color:var(--ink); font-size:14px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.shoprow .d { flex:0 0 auto; font-family:var(--mono); font-size:11.5px;
+  color:var(--faint); }
+.shoprow.done .t { color:var(--faint); text-decoration:line-through; }
+
 /* ================================================================ drawer */
 .drawer {
   flex:0 0 auto; border-top:1px solid var(--hairline); background:var(--canvas);
@@ -607,6 +621,7 @@ textarea.code:focus { outline:none; box-shadow:inset 3px 0 0 var(--blue); border
   </button>
   <button class="tab" role="tab" data-tab="voices">voices</button>
   <button class="tab" role="tab" data-tab="progress">progress</button>
+  <button class="tab" role="tab" data-tab="shopping">shopping</button>
   <button class="tab" role="tab" data-tab="log">
     log <span class="badge err" id="badge-log">0</span>
   </button>
@@ -650,6 +665,11 @@ textarea.code:focus { outline:none; box-shadow:inset 3px 0 0 var(--blue); border
     <div class="progbody" id="progbody"></div>
   </section>
 
+  <!-- ----------------------------------------------------------- shopping -->
+  <section class="pane" id="pane-shopping" role="tabpanel">
+    <div class="progbody" id="shopbody"></div>
+  </section>
+
   <!-- ---------------------------------------------------------------- log -->
   <section class="pane" id="pane-log" role="tabpanel">
     <div class="toolbar">
@@ -659,7 +679,7 @@ textarea.code:focus { outline:none; box-shadow:inset 3px 0 0 var(--blue); border
       <span class="chip on" data-level="ERROR" role="checkbox" aria-checked="true" tabindex="0">error</span>
       <label class="check"><input type="checkbox" id="hidelisten" checked> hide listen heartbeats</label>
       <span class="spacer"></span>
-      <span class="kbd"><b>/</b> filter <b>e</b> errors only <b>t</b> test box <b>1</b>-<b>5</b> tabs</span>
+      <span class="kbd"><b>/</b> filter <b>e</b> errors only <b>t</b> test box <b>1</b>-<b>6</b> tabs</span>
       <button id="clear">clear the view</button>
     </div>
     <div class="logwrap">
@@ -747,7 +767,7 @@ function ago(sec) {
 }
 
 /* ==================================================================== tabs */
-const TABS = ["cat", "voices", "progress", "log", "files"];
+const TABS = ["cat", "voices", "progress", "shopping", "log", "files"];
 /* #progress in the URL opens that tab, so a tab can be linked directly.
    Otherwise the last-used tab wins, as before. */
 let tab = location.hash.slice(1) || store.get("tab", "cat");
@@ -760,6 +780,7 @@ function show(name) {
   $$(".pane").forEach(p => p.classList.toggle("on", p.id === "pane-" + name));
   if (name === "log") { unseenErrors = 0; paintBadges(); if (follow) toBottom(); }
   if (name === "progress") loadProgress();
+  if (name === "shopping") loadShopping();
 }
 $$("nav .tab").forEach((b, i) => {
   b.onclick = () => show(b.dataset.tab);
@@ -779,7 +800,7 @@ document.addEventListener("keydown", ev => {
     return;
   }
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-  if (/^[1-5]$/.test(ev.key)) { ev.preventDefault(); show(TABS[+ev.key - 1]); return; }
+  if (/^[1-6]$/.test(ev.key)) { ev.preventDefault(); show(TABS[+ev.key - 1]); return; }
   if (ev.key === "/") { ev.preventDefault(); show("log"); $("#filter").focus(); return; }
   if (ev.key === "e") { ev.preventDefault(); show("log"); errorsOnly(); return; }
   if (ev.key === "t") { ev.preventDefault(); openDrawer(true); $("#talktext").focus(); }
@@ -2319,6 +2340,84 @@ function renderProgress() {
   if (ws.length > 1) wireWeightChart(ws);
 }
 
+/* ============================================================== shopping */
+let SHOP = null;
+
+async function loadShopping() {
+  try { SHOP = await (await fetch("/api/shopping")).json(); } catch (e) { return; }
+  renderShopping();
+}
+
+/* Every write answers with the fresh list, so the page repaints from what is
+   in the file rather than from what it hoped happened. The cat writes the
+   same table, so a repaint can bring in items this page never added. */
+async function shopPost(body) {
+  let d;
+  try {
+    d = await (await fetch("/api/shopping", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    })).json();
+  } catch (e) { return; }
+  SHOP = d;
+  renderShopping();
+}
+
+function renderShopping() {
+  const el = $("#shopbody");
+  if (!SHOP) return;
+  if (SHOP.error) {
+    el.innerHTML = '<div class="empty"><b>The list could not be read.</b>' +
+      esc(SHOP.error) + "</div>";
+    return;
+  }
+  const items = SHOP.items || [];
+  const open = items.filter(i => !i.bought);
+  const done = items.filter(i => i.bought);
+  const val = v => '<span class="v">' + esc(v) + "</span>";
+  const tail = items.length
+    ? val(open.length) + " to buy, " + val(done.length) + " bought"
+    : "empty";
+
+  let h = sec("shopping", "blue", "Shopping list",
+    "The same list the cat keeps. Tell the cat what to buy, or add it here, " +
+    "and check items off from either side.", null, tail);
+  h += '<div class="shopadd">' +
+    '<input type="text" id="shopnew" placeholder="add an item" maxlength="200"' +
+    ' aria-label="new shopping item">' +
+    '<button class="go" id="shopgo">add</button>' +
+    '<button id="shopclear"' + (done.length ? "" : " disabled") +
+    '>clear bought</button></div>';
+  if (!items.length) {
+    h += '<p class="help">Nothing on the list. Mention something to buy at ' +
+      "the cat, or type it above, and it appears here.</p>";
+  } else {
+    const row = i =>
+      '<div class="shoprow' + (i.bought ? " done" : "") + '">' +
+      '<input type="checkbox" data-id="' + i.id + '"' +
+      (i.bought ? " checked" : "") + ' aria-label="' + esc(i.text) + '">' +
+      '<span class="t">' + esc(i.text) + '</span>' +
+      '<span class="d">' + esc(fmtDay((i.added_at || "").slice(0, 10))) +
+      "</span></div>";
+    h += open.map(row).join("") + done.map(row).join("");
+  }
+  h += "</section>";
+  el.innerHTML = h;
+
+  $("#shopgo").onclick = () => {
+    const text = $("#shopnew").value.trim();
+    if (text) shopPost({ op: "add", text });
+  };
+  $("#shopnew").onkeydown = ev => {
+    if (ev.key === "Enter") $("#shopgo").onclick();
+  };
+  $("#shopclear").onclick = () => shopPost({ op: "clear" });
+  $$("#shopbody input[type=checkbox]").forEach(c => {
+    c.onchange = () => shopPost({ op: "bought", id: +c.dataset.id,
+                                  bought: c.checked });
+  });
+}
+
 /* ================================================================ drawer */
 function openDrawer(open) {
   const d = $("#drawer");
@@ -2440,6 +2539,7 @@ loadSettings();
 loadAbilities();
 loadVoices();
 loadProgress();
+loadShopping();
 setInterval(loadAbilities, 20000);
 </script>
 </body>

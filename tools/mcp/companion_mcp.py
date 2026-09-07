@@ -7,6 +7,10 @@ that speaks the scheduled prompts shares. Every event is one row with the
 details in a JSON column. Focus blocks are the exception: closing one updates
 the row that opened it, so a block is always exactly one row.
 
+The shopping list lives in the same file as its own table, because its rows
+change state and get deleted, which the append-only log is the wrong shape
+for. The dashboard's shopping page reads and writes the same table.
+
 The model calls these tools while the owner talks. The answers come back as
 short sentences it can speak, and get_context hands it enough of the recent
 record to compare a day against its plan without reading the whole table.
@@ -38,6 +42,14 @@ SCHEMA = (
     "data TEXT NOT NULL DEFAULT '{}')"
 )
 
+SHOPPING_SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS shopping ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+    "text TEXT NOT NULL, "
+    "added_at TEXT NOT NULL, "
+    "bought INTEGER NOT NULL DEFAULT 0)"
+)
+
 mcp = FastMCP("companion")
 
 
@@ -50,6 +62,7 @@ def db():
     conn.execute("PRAGMA journal_mode=DELETE")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute(SCHEMA)
+    conn.execute(SHOPPING_SCHEMA)
     return conn
 
 
@@ -265,6 +278,133 @@ def looked_outside() -> str:
     """
     put("looked_outside")
     return "Noted, the reminder clock starts over."
+
+
+def find_item(rows, item):
+    """The row whose text best matches what the user said. Exact beats
+    substring in either direction, all case-insensitive, because "the milk"
+    and "牛奶" have to land on the row that was added as "milk" or "牛奶"."""
+    want = " ".join(str(item).split()).lower()
+    if not want:
+        return None
+    for rid, text in rows:
+        if text.lower() == want:
+            return rid, text
+    for rid, text in rows:
+        if want in text.lower() or text.lower() in want:
+            return rid, text
+    return None
+
+
+@mcp.tool()
+def shopping_add(items: list[str]) -> str:
+    """Add items to the shopping list.
+
+    Call this whenever the user mentions something they need to buy or asks
+    to put something on the list. Pass every item they named in the one call,
+    each as its own short entry, in their words.
+    """
+    cleaned = []
+    for item in items or []:
+        item = " ".join(str(item).split())
+        if item:
+            cleaned.append(item)
+    if not cleaned:
+        return "Nothing was named, so the list is unchanged."
+    added, already = [], []
+    with closing(db()) as conn, conn:
+        have = {t.lower() for (t,) in conn.execute(
+            "SELECT text FROM shopping WHERE bought=0")}
+        for item in cleaned:
+            if item.lower() in have:
+                already.append(item)
+                continue
+            conn.execute(
+                "INSERT INTO shopping (text, added_at) VALUES (?, ?)",
+                (item, now()))
+            have.add(item.lower())
+            added.append(item)
+    parts = []
+    if added:
+        parts.append("Added to the shopping list: " + ", ".join(added) + ".")
+    if already:
+        parts.append("Already on it: " + ", ".join(already) + ".")
+    return " ".join(parts)
+
+
+@mcp.tool()
+def shopping_read() -> str:
+    """Read the current shopping list, the items not yet bought.
+
+    Call this when the user asks what is on the list, or after they say yes
+    to hearing it before heading out. Speak the items back in the language
+    the user is speaking right now.
+    """
+    with closing(db()) as conn:
+        rows = conn.execute(
+            "SELECT text FROM shopping WHERE bought=0 ORDER BY id").fetchall()
+    if not rows:
+        return "The shopping list is empty."
+    items = [t for (t,) in rows]
+    word = "item" if len(items) == 1 else "items"
+    # The trailing sentence is for the model, which otherwise falls back to
+    # the profile's default language for post-tool replies. It paraphrases
+    # rather than quotes, so the instruction does not reach the speaker.
+    return (f"{len(items)} {word} to buy: " + ", ".join(items) + ". "
+            "Read these out in the language the user spoke last, keeping "
+            "each item's own wording where the voice can say it.")
+
+
+@mcp.tool()
+def shopping_bought(item: str, remove: bool = False) -> str:
+    """Mark one shopping list item as bought, or take it off the list.
+
+    Call this with remove false when the user says they bought something.
+    Call it with remove true when they say an item should not be on the list
+    at all. The match is loose, so their wording need not be exact.
+    """
+    with closing(db()) as conn, conn:
+        rows = conn.execute(
+            "SELECT id, text FROM shopping WHERE bought=0 ORDER BY id"
+        ).fetchall()
+        hit = find_item(rows, item)
+        if not hit:
+            if not rows:
+                return "The shopping list is already empty."
+            # The list may hold the same thing under another language's name,
+            # which only the model can see. Hand it the list and the retry.
+            return (f"No item called {str(item).strip()} was found. The list "
+                    "holds: " + ", ".join(t for _, t in rows) + ". If one of "
+                    "those is the same thing in other words, call "
+                    "shopping_bought again with it exactly as written here. "
+                    "Do not tell the user it is marked until that succeeds.")
+        rid, text = hit
+        if remove:
+            conn.execute("DELETE FROM shopping WHERE id=?", (rid,))
+            return f"Took {text} off the list."
+        conn.execute("UPDATE shopping SET bought=1 WHERE id=?", (rid,))
+        left = len(rows) - 1
+    if left:
+        return f"Marked {text} bought. {left} still to buy."
+    return f"Marked {text} bought. That was the last one."
+
+
+@mcp.tool()
+def shopping_clear_bought() -> str:
+    """Clear the bought items off the shopping list.
+
+    Call this when the user says the shopping is done or asks to tidy the
+    list. Items not yet bought stay where they are.
+    """
+    with closing(db()) as conn, conn:
+        n = conn.execute("DELETE FROM shopping WHERE bought=1").rowcount
+        left = conn.execute(
+            "SELECT COUNT(*) FROM shopping WHERE bought=0").fetchone()[0]
+    if not n:
+        return "There were no bought items to clear."
+    word = "item" if n == 1 else "items"
+    tail = f" {left} still to buy." if left else " The list is now empty."
+    return f"Cleared {n} bought {word}.{tail}"
 
 
 @mcp.tool()
