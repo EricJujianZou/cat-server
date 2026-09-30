@@ -196,6 +196,7 @@ against Open-Meteo instead of the bundled plugin.
 | [patches/README.md](patches/README.md) | The two mounted files, and what they change |
 | [docs/keeping-it-running.md](docs/keeping-it-running.md) | Why it dies, and the one command that fixes it |
 | [docs/speaking-first.md](docs/speaking-first.md) | How the cat speaks first: the two timeouts, the keepalive, the rituals, the ledger |
+| [docs/callouts.md](docs/callouts.md) | The phone says a line out loud at bubble tea shops, and the phone-side setup |
 | [docs/slim-image.md](docs/slim-image.md) | 10.6GB down to 1.3GB, what came out and how it was checked |
 | [docs/ccpet-on-the-cat.md](docs/ccpet-on-the-cat.md) | ccpet states on the cat's face, and why not its artwork |
 | [docs/pictures-on-the-screen.md](docs/pictures-on-the-screen.md) | Your own artwork on the screen: what it needs, and what it risks |
@@ -210,6 +211,7 @@ against Open-Meteo instead of the bundled plugin.
 |---|---|
 | 8000 | WebSocket the cat holds open, carrying audio both ways |
 | 8003 | HTTP, serves the endpoint the cat asks at boot |
+| 8090 | Windows side, Tailscale only. OwnTracks location reports for [callouts](docs/callouts.md) |
 
 The container runs on host networking rather than a published port map. Docker's
 bridge does not survive `networkingMode=mirrored`: the proxy listens, but nothing
