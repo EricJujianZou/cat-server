@@ -246,6 +246,10 @@ def handle_location(report, area, db, env):
         say(f"report at {lat:.5f},{lon:.5f} too fuzzy ({acc} m), skipped")
         return
     hit = area.closest(lat, lon)
+    # Every report gets a line, so a test walk shows the phone is getting
+    # through even when nothing fires.
+    near = f"{hit[0]['name']} {hit[1]:.0f} m" if hit else "no tea shop mapped"
+    say(f"report {lat:.5f},{lon:.5f} +/-{acc} m, closest {near}")
     if hit is None or hit[1] > HIT_METERS:
         return
     shop, dist = hit
