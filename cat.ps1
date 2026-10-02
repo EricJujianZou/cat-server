@@ -17,10 +17,6 @@
 #                           the times in config/rituals.yaml, detached like the
 #                           watch helpers. `rituals stop` and `rituals status`
 #                           do what they say
-#   .\cat.ps1 callout       start the listener that has the phone call him out
-#                           out loud at bubble tea shops. `callout stop`,
-#                           `callout status` and `callout test`, which sends
-#                           the trigger email once. See docs/callouts.md
 #   .\cat.ps1 dash          open the dashboard in a browser: what the cat is,
 #                           every setting as a named field, the log, the voices,
 #                           and a box to test a change without the hardware
@@ -136,49 +132,12 @@ switch ($sub) {
     }
   }
 
-  'callout' {
-    # Listens for OwnTracks location reports from the phone over Tailscale and
-    # emails the trigger that makes the phone speak. Windows side, because
-    # Tailscale runs there and WSL does not see inbound traffic.
-    $script = 'tools\callout.py'
-    switch ($rest) {
-      'stop' {
-        $found = Helper-Running 'callout'
-        foreach ($p in $found) {
-          Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
-          Write-Host "stopped: $script"
-        }
-        if ($found.Count -eq 0) { Write-Host "not running: $script" }
-      }
-      'status' {
-        $state = if ((Helper-Running 'callout').Count -gt 0) { 'running' } else { 'stopped, start it with .\cat.ps1 callout' }
-        Write-Host "callout listener: $state"
-      }
-      'test' {
-        $py = Get-Py
-        & $py[0] @($py[1..($py.Count-1)]) (Join-Path $repoWin $script) --send-test
-      }
-      default {
-        if ((Helper-Running 'callout').Count -gt 0) {
-          Write-Host "already running: $script"
-        } else {
-          $py = Get-Py
-          $argList = @($py[1..($py.Count-1)]) + @('"' + (Join-Path $repoWin $script) + '"')
-          Start-Process -FilePath $py[0] -ArgumentList $argList `
-            -WorkingDirectory $repoWin -WindowStyle Hidden
-          Write-Host "started: $script  (log in data\callout.log)"
-        }
-      }
-    }
-  }
-
   'status' {
     wsl.exe -e sh -c "cd '$repo' && docker ps --filter name=cat-server --format 'container: {{.Status}}' && python3 tools/build_profile.py show && curl -s -m 5 -o /dev/null -w 'ota endpoint: %{http_code}\n' http://127.0.0.1:8003/xiaozhi/ota/"
     foreach ($h in @(
       @{ needle = 'claude_status_agent'; label = 'status agent';   start = 'watch' },
       @{ needle = 'claude_watch';        label = 'face watcher';   start = 'watch' },
-      @{ needle = 'rituals';             label = 'rituals';        start = 'rituals' },
-      @{ needle = 'callout';             label = 'callout';        start = 'callout' }
+      @{ needle = 'rituals';             label = 'rituals';        start = 'rituals' }
     )) {
       $state = if ((Helper-Running $h.needle).Count -gt 0) { 'running' } else { "stopped, start it with .\cat.ps1 $($h.start)" }
       Write-Host ("{0,-14}{1}" -f ($h.label + ':'), $state)
